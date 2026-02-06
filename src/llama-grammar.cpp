@@ -793,7 +793,7 @@ static void llama_grammar_advance_stack(
               llama_grammar_stacks & new_stacks) {
     if (stack.empty()) {
         if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
-            new_stacks.emplace_back(stack);
+            new_stacks.emplace_back();
         }
         return;
     }
