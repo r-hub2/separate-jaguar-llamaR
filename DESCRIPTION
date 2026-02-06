@@ -20,8 +20,9 @@ SystemRequirements: C++17, GNU make
 Suggests: testthat (>= 3.0.0)
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
+Remotes: Zabis13/ggmlR
 NeedsCompilation: yes
-Packaged: 2026-02-06 09:58:58 UTC; yuri
+Packaged: 2026-02-06 10:14:23 UTC; yuri
 Author: Yuri Baramykov [aut, cre],
   Georgi Gerganov [cph] (Author of the 'llama.cpp' library included in
     src/)
