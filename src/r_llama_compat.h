@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <R.h>
 #include <R_ext/Print.h>
 
@@ -21,22 +22,24 @@ extern "C" {
 #undef stdout
 #endif
 
-// Dummy file pointers that will cause compile errors if used directly
-// This forces code to use our wrapper functions instead
-#define stderr ((FILE*)0)
-#define stdout ((FILE*)0)
+// Sentinel file pointers for our fprintf/fputs wrappers below.
+// Using a non-zero dummy address avoids -Wnonnull warnings from gcc
+// when fprintf(stderr, ...) is expanded.
+static FILE *const r_llama_dummy_stream_ = (FILE*)(void*)(intptr_t)1;
+#define stderr r_llama_dummy_stream_
+#define stdout r_llama_dummy_stream_
 
 // Wrapper for fprintf to stderr -> REprintf
 #define fprintf(stream, ...) \
-    ((stream == (FILE*)0) ? (REprintf(__VA_ARGS__), 0) : fprintf(stream, __VA_ARGS__))
+    ((stream == r_llama_dummy_stream_) ? (REprintf(__VA_ARGS__), 0) : fprintf(stream, __VA_ARGS__))
 
 // Wrapper for fputs to stderr -> REprintf
 #define fputs(str, stream) \
-    ((stream == (FILE*)0) ? (REprintf("%s", str), 0) : fputs(str, stream))
+    ((stream == r_llama_dummy_stream_) ? (REprintf("%s", str), 0) : fputs(str, stream))
 
 // fflush is a no-op for our dummy streams
 #define fflush(stream) \
-    ((stream == (FILE*)0) ? 0 : fflush(stream))
+    ((stream == r_llama_dummy_stream_) ? 0 : fflush(stream))
 
 #ifdef __cplusplus
 }

@@ -247,50 +247,9 @@ static bool is_char_element(llama_grammar_element elem) {
     }
 }
 
-static void print_rule_binary(FILE * file, const llama_grammar_rule & rule) {
-    for (auto elem : rule) {
-        switch (elem.type) {
-            case LLAMA_GRETYPE_END:            fprintf(file, "END");            break;
-            case LLAMA_GRETYPE_ALT:            fprintf(file, "ALT");            break;
-            case LLAMA_GRETYPE_RULE_REF:       fprintf(file, "RULE_REF");       break;
-            case LLAMA_GRETYPE_CHAR:           fprintf(file, "CHAR");           break;
-            case LLAMA_GRETYPE_CHAR_NOT:       fprintf(file, "CHAR_NOT");       break;
-            case LLAMA_GRETYPE_CHAR_RNG_UPPER: fprintf(file, "CHAR_RNG_UPPER"); break;
-            case LLAMA_GRETYPE_CHAR_ALT:       fprintf(file, "CHAR_ALT");       break;
-            case LLAMA_GRETYPE_CHAR_ANY:       fprintf(file, "CHAR_ANY");       break;
-            case LLAMA_GRETYPE_TOKEN:          fprintf(file, "TOKEN");          break;
-            case LLAMA_GRETYPE_TOKEN_NOT:      fprintf(file, "TOKEN_NOT");      break;
-        }
-        switch (elem.type) {
-            case LLAMA_GRETYPE_END:
-            case LLAMA_GRETYPE_ALT:
-            case LLAMA_GRETYPE_RULE_REF:
-                fprintf(file, "(%u) ", elem.value);
-                break;
-            case LLAMA_GRETYPE_CHAR:
-            case LLAMA_GRETYPE_CHAR_NOT:
-            case LLAMA_GRETYPE_CHAR_RNG_UPPER:
-            case LLAMA_GRETYPE_CHAR_ALT:
-            case LLAMA_GRETYPE_CHAR_ANY:
-                fprintf(file, "(\"");
-                print_grammar_char(file, elem.value);
-                fprintf(file, "\") ");
-                break;
-            case LLAMA_GRETYPE_TOKEN:
-                fprintf(file, "<[");
-                fprintf(file, "%u", elem.value);
-                fprintf(file, "]> ");
-                break;
-            case LLAMA_GRETYPE_TOKEN_NOT:
-                fprintf(file, "!");
-                fprintf(file, "<[");
-                fprintf(file, "%u", elem.value);
-                fprintf(file, "]> ");
-                break;
-        }
-    }
-    fprintf(file, "\n");
-}
+// [llamaR patch] Removed unused static function print_rule_binary() to fix
+// -Wunused-function warning (CRAN compliance). Restore from upstream
+// llama.cpp if needed.
 
 static void print_rule(
         FILE     * file,
