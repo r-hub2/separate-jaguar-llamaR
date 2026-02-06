@@ -30,14 +30,15 @@ llama_generate(
 \item{seed}{Random seed for sampling}
 }
 \value{
-Character string with generated text
+A character scalar containing the generated text (excluding the
+  original prompt).
 }
 \description{
 Tokenizes the prompt, runs the full autoregressive decode loop with sampling,
 and returns the generated text (excluding the original prompt).
 }
 \examples{
-\dontrun{
+if (FALSE) {
 model <- llama_load_model("model.gguf", n_gpu_layers = -1L)
 ctx <- llama_new_context(model, n_ctx = 2048L)
 

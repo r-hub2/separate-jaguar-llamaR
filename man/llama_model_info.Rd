@@ -22,7 +22,7 @@ A named list with fields:
 Get model metadata
 }
 \examples{
-\dontrun{
+if (FALSE) {
 model <- llama_load_model("model.gguf")
 info <- llama_model_info(model)
 cat("Model:", info$desc, "\n")

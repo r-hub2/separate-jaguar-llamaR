@@ -7,7 +7,8 @@
 #'   - 1: Errors only (default)
 #'   - 2: Normal (warnings and info)
 #'   - 3: Verbose (all debug messages)
-#' @return Invisible NULL
+#' @return No return value, called for side effects. Sets the global
+#'   verbosity level used by the underlying 'llama.cpp' library.
 #' @export
 #' @examples
 #' # Suppress all output
@@ -26,7 +27,8 @@ llama_set_verbosity <- function(level) {
 
 #' Get current verbosity level
 #'
-#' @return Integer verbosity level (0-3)
+#' @return An integer scalar indicating the current verbosity level
+#'   (0 = silent, 1 = errors only, 2 = normal, 3 = verbose).
 #' @export
 #' @examples
 #' llama_get_verbosity()
@@ -40,7 +42,8 @@ llama_get_verbosity <- function() {
 #' runtime. Use the result to decide whether to pass `n_gpu_layers != 0`
 #' to [llama_load_model].
 #'
-#' @return Logical scalar
+#' @return A logical scalar: \code{TRUE} if at least one GPU backend
+#'   (e.g. Vulkan) is available, \code{FALSE} otherwise.
 #' @export
 #' @examples
 #' if (llama_supports_gpu()) {
@@ -56,10 +59,14 @@ llama_supports_gpu <- function() {
 #'
 #' @param path Path to the .gguf model file
 #' @param n_gpu_layers Number of layers to offload to GPU (0 = CPU only, -1 = all)
-#' @return An opaque model handle (ExternalPtr). Freed automatically on GC or via [llama_free_model].
+#' @return An external pointer (class \code{externalptr}) wrapping the loaded
+#'   model. This handle is required by \code{\link{llama_new_context}},
+#'   \code{\link{llama_model_info}}, and other model-level functions.
+#'   Freed automatically by the garbage collector or manually via
+#'   \code{\link{llama_free_model}}.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' # Load model on CPU only
 #' model <- llama_load_model("model.gguf")
 #'
@@ -78,10 +85,11 @@ llama_load_model <- function(path, n_gpu_layers = 0L) {
 #' Free a loaded model
 #'
 #' @param model Model handle returned by [llama_load_model]
-#' @return Invisible NULL
+#' @return No return value, called for side effects. Releases the memory
+#'   associated with the model.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' # ... use model ...
 #' llama_free_model(model)
@@ -103,7 +111,7 @@ llama_free_model <- function(model) {
 #'   - `desc`: human-readable model description string
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' info <- llama_model_info(model)
 #' cat("Model:", info$desc, "\n")
@@ -119,10 +127,13 @@ llama_model_info <- function(model) {
 #' @param model Model handle returned by [llama_load_model]
 #' @param n_ctx Context window size (number of tokens). 0 means use the model's trained value.
 #' @param n_threads Number of CPU threads to use
-#' @return An opaque context handle (ExternalPtr). Freed automatically on GC or via [llama_free_context].
+#' @return An external pointer (class \code{externalptr}) wrapping the inference
+#'   context. This handle is required by generation, tokenization, and embedding
+#'   functions. Freed automatically by the garbage collector or manually via
+#'   \code{\link{llama_free_context}}.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' ctx <- llama_new_context(model, n_ctx = 4096L, n_threads = 8L)
 #' # ... use context for generation ...
@@ -136,10 +147,11 @@ llama_new_context <- function(model, n_ctx = 2048L, n_threads = 4L) {
 #' Free an inference context
 #'
 #' @param ctx Context handle returned by [llama_new_context]
-#' @return Invisible NULL
+#' @return No return value, called for side effects. Releases the memory
+#'   associated with the inference context.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' ctx <- llama_new_context(model)
 #' # ... use context ...
@@ -155,10 +167,10 @@ llama_free_context <- function(ctx) {
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param text Character string to tokenize
 #' @param add_special Whether to add special tokens (BOS/EOS) as configured by the model
-#' @return Integer vector of token IDs
+#' @return An integer vector of token IDs as used by the model's vocabulary.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' ctx <- llama_new_context(model)
 #'
@@ -178,10 +190,10 @@ llama_tokenize <- function(ctx, text, add_special = TRUE) {
 #'
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param tokens Integer vector of token IDs (as returned by [llama_tokenize])
-#' @return Character string
+#' @return A character scalar containing the decoded text.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' ctx <- llama_new_context(model)
 #'
@@ -208,10 +220,11 @@ llama_detokenize <- function(ctx, tokens) {
 #' @param top_k Top-K filtering (0 = disabled)
 #' @param top_p Top-P (nucleus) filtering (1.0 = disabled)
 #' @param seed Random seed for sampling
-#' @return Character string with generated text
+#' @return A character scalar containing the generated text (excluding the
+#'   original prompt).
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf", n_gpu_layers = -1L)
 #' ctx <- llama_new_context(model, n_ctx = 2048L)
 #'
@@ -242,10 +255,11 @@ llama_generate <- function(ctx, prompt, max_new_tokens = 256L,
 #'
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param text Character string to embed
-#' @return Numeric vector of length `n_embd`
+#' @return A numeric vector of length \code{n_embd} (the model's embedding
+#'   dimension) containing the hidden-state representation of the input text.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("model.gguf")
 #' ctx <- llama_new_context(model)
 #'
@@ -272,10 +286,11 @@ llama_embeddings <- function(ctx, text) {
 #'
 #' @param model Model handle returned by [llama_load_model]
 #' @param name Optional template name (NULL for default)
-#' @return Character string with the template, or NULL if not available
+#' @return A character scalar with the chat template string, or \code{NULL} if
+#'   the model does not contain a built-in template.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("llama-3.2-instruct.gguf")
 #' tmpl <- llama_chat_template(model)
 #' cat(tmpl)
@@ -293,10 +308,11 @@ llama_chat_template <- function(model, name = NULL) {
 #'   Roles are typically "system", "user", "assistant".
 #' @param template Template string (from [llama_chat_template]) or NULL to use default
 #' @param add_generation_prompt Whether to add the assistant prompt prefix at the end
-#' @return Formatted prompt string ready for generation
+#' @return A character scalar containing the formatted prompt string, ready
+#'   to be passed to \code{\link{llama_generate}}.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("llama-3.2-instruct.gguf")
 #' tmpl <- llama_chat_template(model)
 #'
@@ -327,10 +343,12 @@ llama_chat_apply_template <- function(messages, template = NULL, add_generation_
 #'
 #' @param model Model handle returned by [llama_load_model]
 #' @param path Path to the LoRA adapter file (.gguf or .bin)
-#' @return LoRA adapter handle (ExternalPtr)
+#' @return An external pointer (class \code{externalptr}) wrapping the loaded
+#'   LoRA (Low-Rank Adaptation) adapter. Pass this handle to
+#'   \code{\link{llama_lora_apply}} to activate the adapter.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("base-model.gguf")
 #' lora <- llama_lora_load(model, "fine-tuned-adapter.gguf")
 #'
@@ -354,10 +372,11 @@ llama_lora_load <- function(model, path) {
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param lora LoRA adapter handle from [llama_lora_load]
 #' @param scale Scaling factor for the adapter (1.0 = full effect, 0.5 = half effect)
-#' @return Invisible NULL
+#' @return No return value, called for side effects. Activates the LoRA adapter
+#'   for the given context.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' model <- llama_load_model("base-model.gguf")
 #' lora <- llama_lora_load(model, "adapter.gguf")
 #' ctx <- llama_new_context(model)
@@ -379,8 +398,13 @@ llama_lora_apply <- function(ctx, lora, scale = 1.0) {
 #'
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param lora LoRA adapter handle to remove
-#' @return Integer: 0 on success, -1 if adapter was not applied
+#' @return An integer scalar: 0 on success, -1 if the adapter was not applied
+#'   to this context.
 #' @export
+#' @examples
+#' if (FALSE) {
+#' llama_lora_remove(ctx, lora)
+#' }
 llama_lora_remove <- function(ctx, lora) {
     .Call("r_llama_lora_remove", ctx, lora)
 }
@@ -390,10 +414,11 @@ llama_lora_remove <- function(ctx, lora) {
 #' Deactivates all LoRA adapters from the context, returning to base model behavior.
 #'
 #' @param ctx Context handle returned by [llama_new_context]
-#' @return Invisible NULL
+#' @return No return value, called for side effects. Removes all active LoRA
+#'   adapters from the context.
 #' @export
 #' @examples
-#' \dontrun{
+#' if (FALSE) {
 #' # Apply multiple LoRAs
 #' llama_lora_apply(ctx, lora1)
 #' llama_lora_apply(ctx, lora2)
