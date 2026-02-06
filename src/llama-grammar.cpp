@@ -672,10 +672,11 @@ void llama_grammar_parser::print(FILE * file) {
 }
 
 llama_grammar_stack llama_grammar_parser::c_rules() const {
+    static const llama_grammar_element end_element = {LLAMA_GRETYPE_END, 0};
     llama_grammar_stack ret;
     ret.reserve(rules.size());
     for (const auto & rule : rules) {
-        ret.push_back(rule.data());
+        ret.push_back(rule.empty() ? &end_element : rule.data());
     }
     return ret;
 }
