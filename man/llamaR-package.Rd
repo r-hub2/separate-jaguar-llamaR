@@ -6,7 +6,7 @@
 \alias{llamaR-package}
 \title{llamaR: Interface for Large Language Models in R}
 \description{
-Provides R bindings to 'llama.cpp' for running Large Language Models ('LLMs') locally. Supports model loading, text generation, tokenization, and embeddings. Built on top of 'ggmlR' for efficient tensor operations with optional Graphics Processing Unit ('GPU') acceleration.
+Provides 'R' bindings to 'llama.cpp' for running Large Language Models ('LLMs') locally with optional 'Vulkan' GPU acceleration via 'ggmlR'. Supports model loading, text generation, tokenization, embeddings, chat templates, and 'LoRA' adapters. Built on top of 'ggmlR' for efficient tensor operations.
 }
 \seealso{
 Useful links:

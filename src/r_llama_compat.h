@@ -41,6 +41,18 @@ static FILE *const r_llama_dummy_stream_ = (FILE*)(void*)(intptr_t)1;
 #define fflush(stream) \
     ((stream == r_llama_dummy_stream_) ? 0 : fflush(stream))
 
+// Override exit/_Exit to prevent process termination (CRAN requirement)
+static inline void r_llama_exit(int status) {
+    Rf_error("llama: exit called with status %d", status);
+    while(1) {} // Rf_error never returns, but silence compiler warnings
+}
+
+#undef exit
+#define exit(status) r_llama_exit(status)
+
+#undef _Exit
+#define _Exit(status) r_llama_exit(status)
+
 #ifdef __cplusplus
 }
 #endif
