@@ -15,7 +15,7 @@ else
     fi
 fi
 
-# --- SIMD support (opt-in via --with-simd) ---
+# --- Parse arguments ---
 USE_SIMD="no"
 for arg in "$@"; do
   case "$arg" in
@@ -25,6 +25,7 @@ for arg in "$@"; do
   esac
 done
 
+# --- SIMD support (opt-in via --with-simd) ---
 SIMD_CFLAGS=""
 if [ "$USE_SIMD" = "yes" ]; then
   echo "SIMD: enabled via --with-simd, detecting CPU features..."
@@ -60,7 +61,16 @@ if [ "$USE_SIMD" = "yes" ]; then
     echo "  No SIMD flags detected, using scalar fallback"
   fi
 else
-  echo "SIMD: disabled (use --with-simd to enable CPU acceleration)"
+  echo "SIMD: disabled (use configure.args = '--with-simd' to enable)"
+fi
+
+# --- Vulkan auto-detection (for linking only, Vulkan compiled in ggmlR) ---
+VULKAN_LIBS=""
+if pkg-config --exists vulkan 2>/dev/null; then
+    echo "Vulkan: detected (will link -lvulkan)"
+    VULKAN_LIBS="$(pkg-config --libs vulkan)"
+else
+    echo "Vulkan: not found (building without GPU support)"
 fi
 
 # Get OpenMP flags from R
@@ -70,23 +80,15 @@ if [ -f "$MAKECONF" ]; then
     OPENMP_CXXFLAGS=$(grep "^SHLIB_OPENMP_CXXFLAGS" "$MAKECONF" | sed 's/.*= *//')
 fi
 
-# Check for Vulkan support (optional)
-VULKAN_CPPFLAGS=""
-VULKAN_LIBS=""
-
-if pkg-config --exists vulkan 2>/dev/null; then
-    echo "Vulkan support detected"
-    VULKAN_CPPFLAGS="-DGGML_USE_VULKAN $(pkg-config --cflags vulkan)"
-    VULKAN_LIBS="$(pkg-config --libs vulkan)"
-else
-    echo "Vulkan not found, building without GPU support"
-fi
-
 # Generate Makevars from template
 sed -e "s|@OPENMP_CXXFLAGS@|${OPENMP_CXXFLAGS}|g" \
-    -e "s|@VULKAN_CPPFLAGS@|${VULKAN_CPPFLAGS}|g" \
-    -e "s|@VULKAN_LIBS@|${VULKAN_LIBS}|g" \
     -e "s|@SIMD_CFLAGS@|${SIMD_CFLAGS}|g" \
+    -e "s|@VULKAN_LIBS@|${VULKAN_LIBS}|g" \
     src/Makevars.in > src/Makevars
 
-echo "Configuration complete"
+echo "Configuration complete."
+if [ "$USE_SIMD" = "yes" ]; then
+  echo "  SIMD: ENABLED"
+else
+  echo "  SIMD: disabled"
+fi

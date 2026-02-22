@@ -15,54 +15,7 @@ else
     fi
 fi
 
-# --- Vulkan detection (optional) ---
-USE_VULKAN="auto"
-VULKAN_CPPFLAGS=""
-VULKAN_LIBS=""
-
-for arg in "$@"; do
-  case "$arg" in
-    --with-vulkan)
-      USE_VULKAN="yes"
-      ;;
-    --without-vulkan)
-      USE_VULKAN="no"
-      ;;
-  esac
-done
-
-if [ "$USE_VULKAN" = "no" ]; then
-  echo "Vulkan: disabled by --without-vulkan"
-fi
-
-if [ "$USE_VULKAN" = "auto" ] || [ "$USE_VULKAN" = "yes" ]; then
-  echo "Checking for Vulkan support..."
-
-  HAVE_VULKAN="no"
-  if [ -n "$VULKAN_SDK" ] && [ -d "$VULKAN_SDK/Include" ] && [ -d "$VULKAN_SDK/Lib" ]; then
-    HAVE_VULKAN="yes"
-  fi
-
-  if [ "$HAVE_VULKAN" = "no" ]; then
-    if [ "$USE_VULKAN" = "yes" ]; then
-      echo "ERROR: Vulkan SDK not found."
-      echo "  Install Vulkan SDK from: https://vulkan.lunarg.com/sdk/home"
-      echo "  Ensure VULKAN_SDK environment variable is set."
-      exit 1
-    else
-      echo "Note: Vulkan GPU support not enabled (Vulkan SDK not found)."
-      echo "  Building CPU-only version."
-      USE_VULKAN="no"
-    fi
-  else
-    USE_VULKAN="yes"
-    echo "Vulkan SDK detected: $VULKAN_SDK"
-    VULKAN_CPPFLAGS="-DGGML_USE_VULKAN -I\"${VULKAN_SDK}/Include\""
-    VULKAN_LIBS="-L\"${VULKAN_SDK}/Lib\" -lvulkan-1"
-  fi
-fi
-
-# --- SIMD support (opt-in via --with-simd) ---
+# --- Parse arguments ---
 USE_SIMD="no"
 for arg in "$@"; do
   case "$arg" in
@@ -72,6 +25,7 @@ for arg in "$@"; do
   esac
 done
 
+# --- SIMD support (opt-in via --with-simd) ---
 SIMD_CFLAGS=""
 if [ "$USE_SIMD" = "yes" ]; then
   echo "SIMD: enabled via --with-simd, detecting CPU features..."
@@ -107,19 +61,27 @@ if [ "$USE_SIMD" = "yes" ]; then
     echo "  No SIMD flags detected, using scalar fallback"
   fi
 else
-  echo "SIMD: disabled (use --with-simd to enable CPU acceleration)"
+  echo "SIMD: disabled (use configure.args = '--with-simd' to enable)"
+fi
+
+# --- Vulkan auto-detection (for linking only, Vulkan compiled in ggmlR) ---
+VULKAN_LIBS=""
+if [ -n "$VULKAN_SDK" ] && [ -d "$VULKAN_SDK/Lib" ]; then
+    echo "Vulkan: detected at $VULKAN_SDK (will link -lvulkan-1)"
+    VULKAN_LIBS="-L\"${VULKAN_SDK}/Lib\" -lvulkan-1"
+else
+    echo "Vulkan: not found (building without GPU support)"
 fi
 
 # Generate Makevars.win from template
 echo "Generating src/Makevars.win..."
 sed -e "s|@SIMD_CFLAGS@|${SIMD_CFLAGS}|g" \
-    -e "s|@VULKAN_CPPFLAGS@|${VULKAN_CPPFLAGS}|g" \
     -e "s|@VULKAN_LIBS@|${VULKAN_LIBS}|g" \
     src/Makevars.win.in > src/Makevars.win
 
 echo "Configuration complete."
-if [ "$USE_VULKAN" = "yes" ]; then
-  echo "  Vulkan: ENABLED"
+if [ "$USE_SIMD" = "yes" ]; then
+  echo "  SIMD: ENABLED"
 else
-  echo "  Vulkan: disabled"
+  echo "  SIMD: disabled"
 fi

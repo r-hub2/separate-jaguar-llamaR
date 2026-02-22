@@ -1,16 +1,23 @@
 # llamaR
 
-R interface to [llama.cpp](https://github.com/ggml-org/llama.cpp) for running large language models locally.
+R interface to [llama.cpp](https://github.com/ggml-org/llama.cpp) for running local inference of large language models (LLMs) directly from R.
 
-## Features
+The package supports GPU acceleration via Vulkan, and automatically falls back to CPU when no GPU is available.
 
-- Load GGUF format models
-- Text generation with configurable sampling parameters
-- Tokenization and detokenization
-- Embedding extraction
-- Chat template support (ChatML, Llama, Mistral, etc.)
-- LoRA adapters
-- Optional GPU acceleration via Vulkan (auto-detected on Linux and Windows)
+## Key Features
+
+- Load and unload models in GGUF format (`llama_load_model`, `llama_free_model`)
+- Create and free contexts (`llama_new_context`, `llama_free_context`)
+- Tokenization, detokenization and text generation (`llama_tokenize`, `llama_detokenize`, `llama_generate`)
+- Embedding extraction (`llama_embeddings`)
+- Hugging Face integration: download and cache models (`llama_hf_download`, `llama_load_model_hf`, etc.)
+- Encoder-decoder model support (T5, BART) via `llama_encode`
+
+## GPU and CPU Support
+
+The package uses [ggmlR](https://github.com/Zabis13/ggmlR) as the low-level backend.
+If ggmlR was built with Vulkan support enabled, llamaR automatically uses the GPU for computation.
+On systems without a GPU, all code runs on CPU with no additional configuration required.
 
 ## Installation
 
