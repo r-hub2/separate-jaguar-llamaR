@@ -1,9 +1,15 @@
-#include <R.h>
-#include <Rinternals.h>
-#include <R_ext/Rdynload.h>
 #include <vector>
 #include <string>
 #include <cstring>
+
+#include <R.h>
+#include <Rinternals.h>
+#include <R_ext/Rdynload.h>
+
+// Rinternals.h defines length() as a macro which conflicts with C++ methods
+#ifdef length
+#undef length
+#endif
 
 #include "llama.h"
 
