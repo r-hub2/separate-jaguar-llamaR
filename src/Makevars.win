@@ -5,8 +5,7 @@ PKG_CPPFLAGS_WIN = -D__USE_MINGW_ANSI_STDIO=1
 
 # Get ggmlR paths
 GGMLR_INCLUDE = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('include', package='ggmlR'))")
-GGMLR_LIB_TRY = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('lib', package='ggmlR'))")
-GGMLR_LIB = $(if $(GGMLR_LIB_TRY),$(GGMLR_LIB_TRY),$(subst /include,/lib,$(GGMLR_INCLUDE)))
+GGMLR_LIB = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('lib', package='ggmlR'))")
 
 # Include paths
 PKG_CPPFLAGS = -I. -I$(GGMLR_INCLUDE) -DGGML_USE_CPU $(PKG_CPPFLAGS_WIN)
@@ -15,8 +14,7 @@ PKG_CPPFLAGS = -I. -I$(GGMLR_INCLUDE) -DGGML_USE_CPU $(PKG_CPPFLAGS_WIN)
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS)
 
 # Link with ggmlR static library
-# Use --whole-archive to ensure all ggml symbols are available to model objects
-PKG_LIBS = -Wl,--whole-archive $(GGMLR_LIB)/libggml.a -Wl,--no-whole-archive $(SHLIB_OPENMP_CXXFLAGS) -lpthread -lm
+PKG_LIBS = -L$(GGMLR_LIB) -lggml $(SHLIB_OPENMP_CXXFLAGS) -lpthread -lm
 
 # llama.cpp sources
 SOURCES_CPP = \

@@ -24,7 +24,7 @@ Suggests: testthat (>= 3.0.0), withr
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 NeedsCompilation: yes
-Packaged: 2026-02-22 21:32:08 UTC; yuri
+Packaged: 2026-02-22 22:22:28 UTC; yuri
 Author: Yuri Baramykov [aut, cre],
   Georgi Gerganov [cph] (Author of the 'llama.cpp' library included in
     src/)
