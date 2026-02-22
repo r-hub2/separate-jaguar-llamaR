@@ -18,12 +18,12 @@ Depends: R (>= 4.1.0), ggmlR
 LinkingTo: ggmlR
 SystemRequirements: C++17, GNU make
 Imports: jsonlite, utils
-Suggests: testthat (>= 3.0.0)
+Suggests: testthat (>= 3.0.0), withr
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 Remotes: Zabis13/ggmlR
 NeedsCompilation: yes
-Packaged: 2026-02-15 06:10:06 UTC; yuri
+Packaged: 2026-02-22 06:03:40 UTC; yuri
 Author: Yuri Baramykov [aut, cre],
   Georgi Gerganov [cph] (Author of the 'llama.cpp' library included in
     src/)

@@ -347,8 +347,9 @@ llama_hf_download <- function(repo_id,
 #' Convenience function that downloads a GGUF model from Hugging Face (if not
 #' already cached) and loads it via \code{\link{llama_load_model}}.
 #'
-#' @inheritParams llama_hf_download
-#' @param ... Additional arguments passed to \code{\link{llama_hf_download}}.
+#' @param repo_id Character. Hugging Face repository in \code{"org/repo"} format.
+#' @param ... Additional arguments passed to \code{\link{llama_hf_download}}
+#'   (e.g. \code{pattern}, \code{cache_dir}, \code{force}).
 #' @param n_gpu_layers Integer. Number of layers to offload to GPU.
 #'   Use \code{-1L} for all layers. Defaults to \code{0L} (CPU only).
 #' @return An external pointer to the loaded model, as returned by

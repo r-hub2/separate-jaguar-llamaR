@@ -9,7 +9,8 @@ llama_load_model_hf(repo_id, ..., n_gpu_layers = 0L)
 \arguments{
 \item{repo_id}{Character. Hugging Face repository in \code{"org/repo"} format.}
 
-\item{...}{Additional arguments passed to \code{\link{llama_hf_download}}.}
+\item{...}{Additional arguments passed to \code{\link{llama_hf_download}}
+(e.g. \code{pattern}, \code{cache_dir}, \code{force}).}
 
 \item{n_gpu_layers}{Integer. Number of layers to offload to GPU.
 Use \code{-1L} for all layers. Defaults to \code{0L} (CPU only).}
