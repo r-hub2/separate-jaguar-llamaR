@@ -2,17 +2,30 @@
 
 # Configure script for llamaR (Windows/Rtools)
 
-# Check that ggmlR is installed
+# Find ggmlR lib path - try multiple methods
 echo "Checking for ggmlR..."
+GGMLR_LIB=""
+
+# Method 1: Rscript with all library paths
 GGMLR_LIB=$(${R_HOME}/bin/Rscript -e "cat(system.file('lib', package='ggmlR'))" 2>/dev/null)
+
+# Method 2: Check R_LIBS and R_LIBS_USER
 if [ -z "$GGMLR_LIB" ] || [ ! -d "$GGMLR_LIB" ]; then
-    echo "Note: ggmlR not found (will be checked at compile time)"
+    for libdir in $R_LIBS $R_LIBS_USER $R_LIBS_SITE; do
+        # Handle path separators (semicolon on Windows)
+        echo "$libdir" | tr ';' '\n' | while read -r dir; do
+            if [ -f "$dir/ggmlR/lib/libggml.a" ]; then
+                echo "$dir/ggmlR/lib"
+                break
+            fi
+        done
+    done | head -1 | read GGMLR_LIB 2>/dev/null || true
+fi
+
+if [ -z "$GGMLR_LIB" ] || [ ! -d "$GGMLR_LIB" ]; then
+    echo "Note: ggmlR not found at configure time (will be resolved at compile time)"
 else
-    if [ ! -f "$GGMLR_LIB/libggml.a" ]; then
-        echo "Note: libggml.a not found in ggmlR (will be checked at compile time)"
-    else
-        echo "Found ggmlR at: $GGMLR_LIB"
-    fi
+    echo "Found ggmlR at: $GGMLR_LIB"
 fi
 
 # --- Vulkan auto-detection (for linking only, Vulkan compiled in ggmlR) ---

@@ -17,8 +17,8 @@ PKG_CPPFLAGS = -I. -I$(GGMLR_INCLUDE) -DGGML_USE_CPU $(PKG_CPPFLAGS_WIN)
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS)
 
 # Link with ggmlR static library
-# Use --whole-archive to ensure all ggml symbols are available to model objects
-PKG_LIBS = -L$(GGMLR_LIB) -Wl,--whole-archive -lggml -Wl,--no-whole-archive $(SHLIB_OPENMP_CXXFLAGS) @VULKAN_LIBS@ -lpthread -lm
+# Use --whole-archive with full path to ensure all ggml symbols are available
+PKG_LIBS = -Wl,--whole-archive $(GGMLR_LIB)/libggml.a -Wl,--no-whole-archive $(SHLIB_OPENMP_CXXFLAGS) @VULKAN_LIBS@ -lpthread -lm
 
 # llama.cpp sources
 SOURCES_CPP = \
