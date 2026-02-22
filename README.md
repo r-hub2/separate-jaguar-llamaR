@@ -32,6 +32,16 @@ remotes::install_github("Zabis13/llamaR")
 - C++17 compiler
 - GNU make
 
+### Optional: CPU SIMD Acceleration
+
+By default, llamaR is built without SIMD flags for maximum portability. To enable CPU SIMD acceleration (AVX2, SSE4, etc.) for faster inference:
+
+```r
+install.packages("llamaR", configure.args = "--with-simd")
+```
+
+This auto-detects supported SIMD instructions on your CPU and enables them at compile time.
+
 ## Quick Start
 
 ```r
