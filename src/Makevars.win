@@ -5,7 +5,8 @@ PKG_CPPFLAGS_WIN = -D__USE_MINGW_ANSI_STDIO=1
 
 # Get ggmlR paths
 GGMLR_INCLUDE = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('include', package='ggmlR'))")
-GGMLR_LIB = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('lib', package='ggmlR'))")
+GGMLR_LIB_TRY = $(shell "$(R_HOME)/bin/Rscript" -e "cat(system.file('lib', package='ggmlR'))")
+GGMLR_LIB = $(if $(GGMLR_LIB_TRY),$(GGMLR_LIB_TRY),$(subst /include,/lib,$(GGMLR_INCLUDE)))
 
 # Include paths
 PKG_CPPFLAGS = -I. -I$(GGMLR_INCLUDE) -DGGML_USE_CPU $(PKG_CPPFLAGS_WIN)

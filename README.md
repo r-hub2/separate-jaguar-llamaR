@@ -19,6 +19,19 @@ The package uses [ggmlR](https://github.com/Zabis13/ggmlR) as the low-level back
 If ggmlR was built with Vulkan support enabled, llamaR automatically uses the GPU for computation.
 On systems without a GPU, all code runs on CPU with no additional configuration required.
 
+### How Vulkan linking works
+
+Vulkan support is compiled entirely within ggmlR — llamaR does not compile any Vulkan code itself.
+However, since llamaR links against `libggml.a` (from ggmlR) using `--whole-archive`, the Vulkan
+symbols (e.g. `vkCmdCopyBuffer`, `vkGetInstanceProcAddr`) need to be resolved at link time.
+
+The llamaR `configure` script handles this automatically:
+- **Linux**: checks `pkg-config --exists vulkan` and adds `-lvulkan` to the linker flags
+- **Windows**: checks for the `VULKAN_SDK` environment variable and adds `-lvulkan-1`
+
+If Vulkan is not found on the system, the build proceeds without it — the Vulkan backend
+in `libggml.a` will simply remain unused, and inference runs on CPU only.
+
 ## Installation
 
 ### Dependencies
@@ -38,16 +51,6 @@ remotes::install_github("Zabis13/llamaR")
 - R >= 4.1.0
 - C++17 compiler
 - GNU make
-
-### Optional: CPU SIMD Acceleration
-
-By default, llamaR is built without SIMD flags for maximum portability. To enable CPU SIMD acceleration (AVX2, SSE4, etc.) for faster inference:
-
-```r
-install.packages("llamaR", configure.args = "--with-simd")
-```
-
-This auto-detects supported SIMD instructions on your CPU and enables them at compile time.
 
 ## Quick Start
 
