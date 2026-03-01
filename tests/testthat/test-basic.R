@@ -79,6 +79,35 @@ test_that("max_devices returns positive integer", {
     expect_true(result >= 1L)
 })
 
+test_that("llama_time_us returns positive numeric", {
+    t <- llama_time_us()
+    expect_true(is.numeric(t))
+    expect_true(t > 0)
+})
+
+test_that("llama_numa_init does not error with disabled", {
+    expect_no_error(llama_numa_init("disabled"))
+})
+
+test_that("llama_numa_init errors on invalid strategy", {
+    expect_error(llama_numa_init("bogus"), "invalid NUMA")
+})
+
+test_that("llama_backend_devices returns data.frame", {
+    df <- llama_backend_devices()
+    expect_true(is.data.frame(df))
+    expect_true(nrow(df) >= 1L)
+    expect_true(all(c("name", "description", "type") %in% names(df)))
+    expect_true(all(df$type %in% c("cpu", "gpu", "igpu", "accel", "unknown")))
+})
+
+test_that("llama_load_model with devices='cpu' works", {
+    skip_if_no_model()
+    model <- llama_load_model(MODEL_PATH, devices = "cpu")
+    expect_false(is.null(model))
+    llama_free_model(model)
+})
+
 test_that("chat_builtin_templates returns character vector", {
     templates <- llama_chat_builtin_templates()
     expect_true(is.character(templates))
@@ -303,6 +332,23 @@ test_that("embeddings have correct dimensionality", {
     expect_true(is.numeric(emb))
     expect_equal(length(emb), shared_info$n_embd)
     expect_true(any(emb != 0))
+})
+
+test_that("llama_get_embeddings_ith returns correct vector", {
+    skip_if_no_model()
+
+    ctx <- llama_new_context(shared_model, n_ctx = 256L, n_threads = 2L)
+    on.exit(llama_free_context(ctx))
+
+    # run embeddings to populate output
+    emb_full <- llama_embeddings(ctx, "Hello")
+
+    # get_embeddings_ith(-1) should return the same as llama_embeddings
+    emb_ith <- llama_get_embeddings_ith(ctx, -1L)
+
+    expect_true(is.numeric(emb_ith))
+    expect_equal(length(emb_ith), shared_info$n_embd)
+    expect_equal(emb_ith, emb_full)
 })
 
 # ============================================================
@@ -566,6 +612,140 @@ test_that("llama_encode returns integer on encoder-decoder model", {
 
     expect_true(is.integer(ret))
     expect_equal(ret, 0L)
+})
+
+# ============================================================
+# GPU: batch_init + encode on GPU context
+# ============================================================
+
+# ============================================================
+# embed_llamar
+# ============================================================
+
+test_that("llama_embed_batch returns matrix with correct dimensions", {
+    skip_if_no_model()
+
+    # embedding=FALSE: sequential last-token decode (works on generative models)
+    ctx <- llama_new_context(shared_model, n_ctx = 256L, n_threads = 2L)
+    on.exit(llama_free_context(ctx))
+
+    mat <- llama_embed_batch(ctx, c("hello", "world", "test"))
+
+    expect_true(is.matrix(mat))
+    expect_equal(nrow(mat), 3L)
+    expect_equal(ncol(mat), shared_info$n_embd)
+    expect_true(any(mat != 0))
+})
+
+test_that("llama_embed_batch single text matches llama_embeddings", {
+    skip_if_no_model()
+
+    ctx1 <- llama_new_context(shared_model, n_ctx = 256L, n_threads = 2L)
+    on.exit(llama_free_context(ctx1), add = TRUE)
+
+    emb_single <- llama_embeddings(ctx1, "hello")
+
+    ctx2 <- llama_new_context(shared_model, n_ctx = 256L, n_threads = 2L)
+    on.exit(llama_free_context(ctx2), add = TRUE)
+
+    mat <- llama_embed_batch(ctx2, "hello")
+
+    expect_equal(nrow(mat), 1L)
+    expect_equal(ncol(mat), length(emb_single))
+})
+
+test_that("llama_embed_batch empty input returns 0-row matrix", {
+    skip_if_no_model()
+
+    ctx <- llama_new_context(shared_model, n_ctx = 256L, n_threads = 2L)
+    on.exit(llama_free_context(ctx))
+
+    mat <- llama_embed_batch(ctx, character(0))
+
+    expect_true(is.matrix(mat))
+    expect_equal(nrow(mat), 0L)
+})
+
+test_that("embed_llamar partial application returns a function", {
+    skip_if_no_model()
+
+    fn <- embed_llamar(model = shared_model)
+    expect_true(is.function(fn))
+})
+
+test_that("embed_llamar partial application produces list of vectors", {
+    skip_if_no_model()
+
+    fn <- embed_llamar(model = shared_model, n_ctx = 256L, n_threads = 2L)
+    result <- fn(c("hello", "world"))
+
+    expect_true(is.list(result))
+    expect_equal(length(result), 2L)
+    expect_true(is.numeric(result[[1]]))
+    expect_equal(length(result[[1]]), shared_info$n_embd)
+})
+
+test_that("embed_llamar direct call returns matrix", {
+    skip_if_no_model()
+
+    mat <- embed_llamar(c("hello", "world"), model = shared_model,
+                        n_ctx = 256L, n_threads = 2L)
+
+    expect_true(is.matrix(mat))
+    expect_equal(nrow(mat), 2L)
+    expect_equal(ncol(mat), shared_info$n_embd)
+})
+
+test_that("embed_llamar normalizes by default", {
+    skip_if_no_model()
+
+    mat <- embed_llamar("hello", model = shared_model,
+                        n_ctx = 256L, n_threads = 2L)
+    norm <- sqrt(sum(mat[1, ]^2))
+    expect_equal(norm, 1.0, tolerance = 1e-6)
+})
+
+test_that("embed_llamar normalize=FALSE skips normalization", {
+    skip_if_no_model()
+
+    mat <- embed_llamar("hello", model = shared_model,
+                        n_ctx = 256L, n_threads = 2L, normalize = FALSE)
+    norm <- sqrt(sum(mat[1, ]^2))
+    # raw embeddings are unlikely to have unit norm
+    expect_true(is.numeric(mat))
+})
+
+test_that("embed_llamar with data.frame returns data.frame with embedding column", {
+    skip_if_no_model()
+
+    df <- data.frame(text = c("hello", "world"), id = 1:2)
+    result <- embed_llamar(df, model = shared_model,
+                           n_ctx = 256L, n_threads = 2L)
+
+    expect_true(is.data.frame(result))
+    expect_true("embedding" %in% names(result))
+    expect_true("id" %in% names(result))
+    expect_equal(nrow(result), 2L)
+    expect_true(is.list(result$embedding))
+    expect_equal(length(result$embedding[[1]]), shared_info$n_embd)
+})
+
+test_that("embed_llamar errors on data.frame without text column", {
+    skip_if_no_model()
+
+    df <- data.frame(content = "hello")
+    expect_error(embed_llamar(df, model = shared_model),
+                 "text")
+})
+
+test_that("embed_llamar with model path loads and frees model", {
+    skip_if_no_model()
+
+    mat <- embed_llamar("hello", model = MODEL_PATH,
+                        n_ctx = 256L, n_threads = 2L)
+    expect_true(is.matrix(mat))
+    expect_equal(nrow(mat), 1L)
+    expect_equal(ncol(mat), shared_info$n_embd)
 })
 
 # ============================================================

@@ -12,6 +12,8 @@
 #endif
 
 #include "llama.h"
+#include <ggml-backend.h>
+#include <ggml-cpu.h>
 
 // ============================================================
 // Logging control
@@ -88,10 +90,72 @@ extern "C" SEXP r_llama_get_verbosity(void) {
 }
 
 // ============================================================
+// Time / NUMA / Backend devices
+// ============================================================
+
+extern "C" SEXP r_llama_time_us(void) {
+    return Rf_ScalarReal((double) llama_time_us());
+}
+
+extern "C" SEXP r_llama_numa_init(SEXP r_strategy) {
+    ensure_backend_init();
+    int strategy = INTEGER(r_strategy)[0];
+    if (strategy < 0 || strategy >= GGML_NUMA_STRATEGY_COUNT)
+        Rf_error("llamaR: invalid NUMA strategy %d (valid: 0..%d)", strategy,
+                 GGML_NUMA_STRATEGY_COUNT - 1);
+    llama_numa_init((enum ggml_numa_strategy) strategy);
+    return R_NilValue;
+}
+
+extern "C" SEXP r_llama_backend_devices(void) {
+    ensure_backend_init();
+    size_t n = ggml_backend_dev_count();
+
+    SEXP names_vec = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t) n));
+    SEXP descs_vec = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t) n));
+    SEXP types_vec = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t) n));
+
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        SET_STRING_ELT(names_vec, (R_xlen_t) i, Rf_mkChar(ggml_backend_dev_name(dev)));
+        SET_STRING_ELT(descs_vec, (R_xlen_t) i, Rf_mkChar(ggml_backend_dev_description(dev)));
+
+        enum ggml_backend_dev_type t = ggml_backend_dev_type(dev);
+        const char * type_str = "unknown";
+        if (t == GGML_BACKEND_DEVICE_TYPE_CPU)   type_str = "cpu";
+        else if (t == GGML_BACKEND_DEVICE_TYPE_GPU)   type_str = "gpu";
+        else if (t == GGML_BACKEND_DEVICE_TYPE_IGPU)  type_str = "igpu";
+        else if (t == GGML_BACKEND_DEVICE_TYPE_ACCEL) type_str = "accel";
+        SET_STRING_ELT(types_vec, (R_xlen_t) i, Rf_mkChar(type_str));
+    }
+
+    // Build data.frame
+    SEXP df = PROTECT(Rf_allocVector(VECSXP, 3));
+    SET_VECTOR_ELT(df, 0, names_vec);
+    SET_VECTOR_ELT(df, 1, descs_vec);
+    SET_VECTOR_ELT(df, 2, types_vec);
+
+    SEXP col_names = PROTECT(Rf_allocVector(STRSXP, 3));
+    SET_STRING_ELT(col_names, 0, Rf_mkChar("name"));
+    SET_STRING_ELT(col_names, 1, Rf_mkChar("description"));
+    SET_STRING_ELT(col_names, 2, Rf_mkChar("type"));
+    Rf_setAttrib(df, R_NamesSymbol, col_names);
+
+    SEXP row_names = PROTECT(Rf_allocVector(INTSXP, 2));
+    INTEGER(row_names)[0] = NA_INTEGER;
+    INTEGER(row_names)[1] = -(int) n;
+    Rf_setAttrib(df, R_RowNamesSymbol, row_names);
+    Rf_setAttrib(df, R_ClassSymbol, Rf_mkString("data.frame"));
+
+    UNPROTECT(6);
+    return df;
+}
+
+// ============================================================
 // Model: load / free / info
 // ============================================================
 
-extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers) {
+extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers, SEXP r_devices) {
     ensure_backend_init();
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
@@ -99,6 +163,38 @@ extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers) {
 
     struct llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = n_gpu_layers;
+
+    // device selection
+    std::vector<ggml_backend_dev_t> devs;
+    if (!Rf_isNull(r_devices)) {
+        int n_devs = Rf_length(r_devices);
+        size_t n_available = ggml_backend_dev_count();
+        for (int i = 0; i < n_devs; i++) {
+            const char * dev_name = CHAR(STRING_ELT(r_devices, i));
+            // try by name first
+            ggml_backend_dev_t dev = ggml_backend_dev_by_name(dev_name);
+            if (!dev) {
+                // try by type keyword: "cpu", "gpu"
+                if (strcmp(dev_name, "cpu") == 0) {
+                    dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+                } else if (strcmp(dev_name, "gpu") == 0) {
+                    dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+                    if (!dev)
+                        dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+                } else {
+                    // try as numeric index (0-based)
+                    char * endptr;
+                    long idx = strtol(dev_name, &endptr, 10);
+                    if (*endptr == '\0' && idx >= 0 && (size_t) idx < n_available)
+                        dev = ggml_backend_dev_get((size_t) idx);
+                }
+            }
+            if (!dev) Rf_error("llamaR: device not found: '%s'", dev_name);
+            devs.push_back(dev);
+        }
+        devs.push_back(nullptr);  // NULL-terminated
+        mparams.devices = devs.data();
+    }
 
     llama_model * model = llama_model_load_from_file(path, mparams);
     if (!model) {
@@ -154,25 +250,43 @@ extern "C" SEXP r_llama_model_info(SEXP r_model) {
 // Context: new / free
 // ============================================================
 
-extern "C" SEXP r_llama_new_context(SEXP r_model, SEXP r_n_ctx, SEXP r_n_threads) {
+extern "C" SEXP r_llama_new_context(SEXP r_model, SEXP r_n_ctx, SEXP r_n_threads,
+                                    SEXP r_embedding) {
     llama_model * model = (llama_model *) R_ExternalPtrAddr(r_model);
     if (!model) Rf_error("llamaR: invalid model pointer");
+
+    bool embedding = LOGICAL(r_embedding)[0];
 
     struct llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx            = (uint32_t) INTEGER(r_n_ctx)[0];
     cparams.n_threads        = INTEGER(r_n_threads)[0];
     cparams.n_threads_batch  = INTEGER(r_n_threads)[0];
+    cparams.embeddings       = embedding;
 
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         Rf_error("llamaR: failed to create context");
     }
 
-    // prot = r_model keeps the model ExternalPtr alive as long as ctx exists
-    SEXP result = PROTECT(R_MakeExternalPtr(ctx, R_NilValue, r_model));
+    if (embedding) {
+        llama_set_causal_attn(ctx, false);
+    }
+
+    // tag = embedding flag, prot = r_model (keeps model alive)
+    SEXP tag = PROTECT(Rf_ScalarLogical(embedding));
+    SEXP result = PROTECT(R_MakeExternalPtr(ctx, tag, r_model));
     R_RegisterCFinalizer(result, context_finalizer);
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result;
+}
+
+// Helper: check if context was created in embedding mode
+static bool ctx_is_embedding(SEXP r_ctx) {
+    SEXP tag = R_ExternalPtrTag(r_ctx);
+    if (tag != R_NilValue && TYPEOF(tag) == LGLSXP) {
+        return LOGICAL(tag)[0];
+    }
+    return false;
 }
 
 extern "C" SEXP r_llama_free_context(SEXP r_ctx) {
@@ -433,6 +547,157 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
 
     llama_set_embeddings(ctx, false);
     return r_result;
+}
+
+extern "C" SEXP r_llama_get_embeddings_ith(SEXP r_ctx, SEXP r_i) {
+    llama_context * ctx = (llama_context *) R_ExternalPtrAddr(r_ctx);
+    if (!ctx) Rf_error("llamaR: invalid context pointer");
+
+    int32_t i = INTEGER(r_i)[0];
+    const llama_model * model = llama_get_model(ctx);
+    int n_embd = llama_model_n_embd(model);
+
+    float * emb = llama_get_embeddings_ith(ctx, i);
+    if (!emb) Rf_error("llamaR: embeddings NULL for index %d", i);
+
+    SEXP r_result = PROTECT(Rf_allocVector(REALSXP, n_embd));
+    for (int j = 0; j < n_embd; j++)
+        REAL(r_result)[j] = (double) emb[j];
+    UNPROTECT(1);
+    return r_result;
+}
+
+extern "C" SEXP r_llama_get_embeddings_seq(SEXP r_ctx, SEXP r_seq_id) {
+    llama_context * ctx = (llama_context *) R_ExternalPtrAddr(r_ctx);
+    if (!ctx) Rf_error("llamaR: invalid context pointer");
+
+    llama_seq_id seq_id = (llama_seq_id) INTEGER(r_seq_id)[0];
+    const llama_model * model = llama_get_model(ctx);
+    int n_embd = llama_model_n_embd(model);
+
+    float * emb = llama_get_embeddings_seq(ctx, seq_id);
+    if (!emb) Rf_error("llamaR: pooled embeddings NULL for seq_id %d (model may not support pooling)", seq_id);
+
+    SEXP r_result = PROTECT(Rf_allocVector(REALSXP, n_embd));
+    for (int j = 0; j < n_embd; j++)
+        REAL(r_result)[j] = (double) emb[j];
+    UNPROTECT(1);
+    return r_result;
+}
+
+// Helper: tokenize a single C-string, returns token count
+static int tokenize_text(const llama_vocab * vocab, const char * text,
+                         std::vector<llama_token> & out) {
+    int text_len = (int) strlen(text);
+    int n_tok = llama_tokenize(vocab, text, text_len, NULL, 0, true, false);
+    if (n_tok < 0) n_tok = -n_tok;
+    out.resize(n_tok);
+    int actual = llama_tokenize(vocab, text, text_len, out.data(), n_tok, true, false);
+    if (actual < 0) return -1;
+    out.resize(actual);
+    return actual;
+}
+
+// Helper: embed a single text using decode + embeddings_ith(-1)
+static void embed_single(llama_context * ctx, const llama_vocab * vocab,
+                          const char * text, float * out, int n_embd, int idx) {
+    std::vector<llama_token> tokens;
+    if (tokenize_text(vocab, text, tokens) < 0)
+        Rf_error("llamaR: tokenization failed for text %d", idx + 1);
+
+    llama_memory_clear(llama_get_memory(ctx), true);
+    struct llama_batch batch = llama_batch_get_one(tokens.data(), (int) tokens.size());
+    int ret = llama_decode(ctx, batch);
+    if (ret != 0)
+        Rf_error("llamaR: embed decode failed for text %d (code %d)", idx + 1, ret);
+    llama_synchronize(ctx);
+
+    float * emb = llama_get_embeddings_ith(ctx, -1);
+    if (!emb)
+        Rf_error("llamaR: embeddings NULL for text %d", idx + 1);
+    memcpy(out, emb, n_embd * sizeof(float));
+}
+
+// Batch embeddings: pooled path (embedding=TRUE) or sequential (embedding=FALSE)
+extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
+    llama_context * ctx = (llama_context *) R_ExternalPtrAddr(r_ctx);
+    if (!ctx) Rf_error("llamaR: invalid context pointer");
+
+    bool embedding = ctx_is_embedding(r_ctx);
+
+    const llama_model * model = llama_get_model(ctx);
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    int n_embd = llama_model_n_embd(model);
+    int n_texts = Rf_length(r_texts);
+
+    if (n_texts == 0) {
+        SEXP r_mat = PROTECT(Rf_allocMatrix(REALSXP, 0, n_embd));
+        UNPROTECT(1);
+        return r_mat;
+    }
+
+    // tokenize all texts
+    std::vector<std::vector<llama_token>> all_tokens(n_texts);
+    int total_tokens = 0;
+    for (int s = 0; s < n_texts; s++) {
+        const char * text = CHAR(STRING_ELT(r_texts, s));
+        if (tokenize_text(vocab, text, all_tokens[s]) < 0)
+            Rf_error("llamaR: tokenization failed for text %d", s + 1);
+        total_tokens += (int) all_tokens[s].size();
+    }
+
+    SEXP r_mat = PROTECT(Rf_allocMatrix(REALSXP, n_texts, n_embd));
+    double * mat_ptr = REAL(r_mat);
+
+    if (embedding) {
+        // --- pooled batch: one decode for all texts ---
+        struct llama_batch batch = llama_batch_init(total_tokens, 0, n_texts);
+        int pos = 0;
+        for (int s = 0; s < n_texts; s++) {
+            for (int t = 0; t < (int) all_tokens[s].size(); t++) {
+                batch.token[pos]      = all_tokens[s][t];
+                batch.pos[pos]        = (llama_pos) t;
+                batch.n_seq_id[pos]   = 1;
+                batch.seq_id[pos][0]  = (llama_seq_id) s;
+                batch.logits[pos]     = (t == (int) all_tokens[s].size() - 1) ? 1 : 0;
+                pos++;
+            }
+        }
+        batch.n_tokens = total_tokens;
+
+        llama_memory_clear(llama_get_memory(ctx), true);
+        int ret = llama_decode(ctx, batch);
+        llama_batch_free(batch);
+        if (ret != 0) {
+            UNPROTECT(1);
+            Rf_error("llamaR: batch embedding decode failed (code %d)", ret);
+        }
+        llama_synchronize(ctx);
+
+        for (int s = 0; s < n_texts; s++) {
+            float * emb = llama_get_embeddings_seq(ctx, (llama_seq_id) s);
+            if (!emb) {
+                UNPROTECT(1);
+                Rf_error("llamaR: pooled embeddings NULL for seq %d", s);
+            }
+            for (int j = 0; j < n_embd; j++)
+                mat_ptr[s + j * n_texts] = (double) emb[j];
+        }
+    } else {
+        // --- sequential: one decode per text, last-token embedding ---
+        llama_set_embeddings(ctx, true);
+        std::vector<float> tmp(n_embd);
+        for (int s = 0; s < n_texts; s++) {
+            const char * text = CHAR(STRING_ELT(r_texts, s));
+            embed_single(ctx, vocab, text, tmp.data(), n_embd, s);
+            for (int j = 0; j < n_embd; j++)
+                mat_ptr[s + j * n_texts] = (double) tmp[j];
+        }
+        llama_set_embeddings(ctx, false);
+    }
+
+    UNPROTECT(1);
+    return r_mat;
 }
 
 // ============================================================
@@ -1006,7 +1271,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"r_llama_set_verbosity",         (DL_FUNC) &r_llama_set_verbosity,         1},
     {"r_llama_get_verbosity",         (DL_FUNC) &r_llama_get_verbosity,         0},
     // Model
-    {"r_llama_load_model",            (DL_FUNC) &r_llama_load_model,            2},
+    {"r_llama_time_us",               (DL_FUNC) &r_llama_time_us,               0},
+    {"r_llama_numa_init",             (DL_FUNC) &r_llama_numa_init,             1},
+    {"r_llama_backend_devices",       (DL_FUNC) &r_llama_backend_devices,       0},
+    {"r_llama_load_model",            (DL_FUNC) &r_llama_load_model,            3},
     {"r_llama_free_model",            (DL_FUNC) &r_llama_free_model,            1},
     {"r_llama_model_info",            (DL_FUNC) &r_llama_model_info,            1},
     {"r_llama_model_size",            (DL_FUNC) &r_llama_model_size,            1},
@@ -1019,7 +1287,7 @@ static const R_CallMethodDef CallEntries[] = {
     // Vocabulary
     {"r_llama_vocab_info",            (DL_FUNC) &r_llama_vocab_info,            1},
     // Context
-    {"r_llama_new_context",           (DL_FUNC) &r_llama_new_context,           3},
+    {"r_llama_new_context",           (DL_FUNC) &r_llama_new_context,           4},
     {"r_llama_free_context",          (DL_FUNC) &r_llama_free_context,          1},
     {"r_llama_n_ctx",                 (DL_FUNC) &r_llama_n_ctx,                 1},
     {"r_llama_set_n_threads",         (DL_FUNC) &r_llama_set_n_threads,         3},
@@ -1037,6 +1305,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"r_llama_generate",              (DL_FUNC) &r_llama_generate,              17},
     // Embeddings & Logits
     {"r_llama_embeddings",            (DL_FUNC) &r_llama_embeddings,            2},
+    {"r_llama_embed_batch",           (DL_FUNC) &r_llama_embed_batch,           2},
+    {"r_llama_get_embeddings_ith",    (DL_FUNC) &r_llama_get_embeddings_ith,    2},
+    {"r_llama_get_embeddings_seq",    (DL_FUNC) &r_llama_get_embeddings_seq,    2},
     {"r_llama_get_logits",            (DL_FUNC) &r_llama_get_logits,            1},
     // Memory / KV Cache
     {"r_llama_memory_clear",          (DL_FUNC) &r_llama_memory_clear,          1},
