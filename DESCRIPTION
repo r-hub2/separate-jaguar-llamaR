@@ -3,7 +3,8 @@ Type: Package
 Title: Interface for Large Language Models via 'llama.cpp'
 Version: 0.2.3
 Authors@R: c(
-    person("Yuri", "Baramykov", email = "lbsbmsu@mail.ru", role = c("aut", "cre")),
+    person("Yuri", "Baramykov", email = "lbsbmsu@mail.ru", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0000-7627-4217")),
     person("Georgi", "Gerganov", role = "cph",
            comment = "Author of the 'llama.cpp' library included in src/"))
 Description: Provides 'R' bindings to 'llama.cpp' for running Large Language Models
@@ -20,14 +21,15 @@ BugReports: https://github.com/Zabis13/llamaR/issues
 Encoding: UTF-8
 Depends: R (>= 4.1.0), ggmlR
 LinkingTo: ggmlR
+Remotes: Zabis13/ggmlR
 SystemRequirements: C++17, GNU make
 Imports: jsonlite, utils
 Suggests: testthat (>= 3.0.0), withr
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 NeedsCompilation: yes
-Packaged: 2026-04-05 18:35:57 UTC; yuri
-Author: Yuri Baramykov [aut, cre],
+Packaged: 2026-05-23 11:54:22 UTC; yuri
+Author: Yuri Baramykov [aut, cre] (<https://orcid.org/0009-0000-7627-4217>),
   Georgi Gerganov [cph] (Author of the 'llama.cpp' library included in
     src/)
 Maintainer: Yuri Baramykov <lbsbmsu@mail.ru>
