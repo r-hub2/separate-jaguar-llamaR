@@ -927,8 +927,7 @@ static struct llama_model * llama_model_load_from_file_impl(
             switch (ggml_backend_dev_type(dev)) {
                 case GGML_BACKEND_DEVICE_TYPE_CPU:
                 case GGML_BACKEND_DEVICE_TYPE_ACCEL:
-                case GGML_BACKEND_DEVICE_TYPE_META:
-                    // skip CPU/meta backends since they are handled separately
+                    // skip CPU backends since they are handled separately
                     break;
 
                 case GGML_BACKEND_DEVICE_TYPE_GPU: {
@@ -963,6 +962,10 @@ static struct llama_model * llama_model_load_from_file_impl(
 
                 case GGML_BACKEND_DEVICE_TYPE_IGPU:
                     igpus.push_back(dev);
+                    break;
+
+                default:
+                    // skip meta / unknown device types
                     break;
             }
         }
