@@ -161,7 +161,9 @@ llama_serve_openai <- function(model_path, port = 11434L,
         args    <- gen_args(body)
         created <- as.integer(Sys.time())
         id      <- new_id()
-        prompt_tokens <- length(llama_tokenize(ctx, prompt))
+        # parse_special = TRUE to match the generation path's tokenization
+        # (role markers are control tokens), so this count matches reality.
+        prompt_tokens <- length(llama_tokenize(ctx, prompt, parse_special = TRUE))
         stream  <- isTRUE(body$stream)
 
         # Reject prompts that don't leave room to generate, instead of

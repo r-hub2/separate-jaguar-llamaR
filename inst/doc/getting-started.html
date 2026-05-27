@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Getting Started with llamaR</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Getting Started with llamaR</h1>
+
+
+
+<p>llamaR provides R bindings to <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> for running
+Large Language Models locally, with optional Vulkan GPU acceleration via
+<a href="https://github.com/Zabis13/ggmlR">ggmlR</a>. This vignette
+walks through the core workflow: get a model, load it, generate text,
+tokenize, and extract embeddings. For the chat/server side see
+<code>vignette(&quot;chat-and-agents&quot;)</code>.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(llamaR)</span></code></pre></div>
+<hr />
+<div id="getting-a-model" class="section level2">
+<h2>1. Getting a model</h2>
+<p>llamaR works with GGUF files. Download one from the Hugging Face Hub
+(cached under <code>~/.cache/llamaR/</code> by default):</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="co"># List the GGUF files in a repo</span></span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">llama_hf_list</span>(<span class="st">&quot;TheBloke/Mistral-7B-Instruct-v0.2-GGUF&quot;</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a><span class="co"># Download one (by filename or by quantization pattern)</span></span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>path <span class="ot">&lt;-</span> <span class="fu">llama_hf_download</span>(</span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="st">&quot;TheBloke/Mistral-7B-Instruct-v0.2-GGUF&quot;</span>,</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>  <span class="at">pattern =</span> <span class="st">&quot;Q4_K_M&quot;</span></span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>)</span></code></pre></div>
+<p>Or point at any GGUF file you already have on disk.</p>
+<hr />
+</div>
+<div id="loading-a-model-and-creating-a-context" class="section level2">
+<h2>2. Loading a model and creating a context</h2>
+<p>A <strong>model</strong> holds the weights; a
+<strong>context</strong> holds the working state (KV cache) for one
+generation session. Both are external pointers with GC finalizers, so
+explicit freeing is optional.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(path, <span class="at">n_gpu_layers =</span> <span class="sc">-</span><span class="dv">1</span><span class="dt">L</span>)   <span class="co"># -1 = offload all layers</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>ctx   <span class="ot">&lt;-</span> <span class="fu">llama_new_context</span>(model, <span class="at">n_ctx =</span> <span class="dv">4096</span><span class="dt">L</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a><span class="fu">llama_model_info</span>(model)   <span class="co"># size, n_params, context length, heads, ...</span></span></code></pre></div>
+<p><code>n_gpu_layers = -1L</code> offloads every layer to the GPU when
+Vulkan is available, and falls back to CPU otherwise.</p>
+<hr />
+</div>
+<div id="generating-text" class="section level2">
+<h2>3. Generating text</h2>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="fu">llama_generate</span>(ctx, <span class="st">&quot;The capital of France is&quot;</span>, <span class="at">max_new_tokens =</span> <span class="dv">32</span><span class="dt">L</span>)</span></code></pre></div>
+<p>Sampling is controlled by arguments (set <code>temp = 0</code> for
+greedy decoding):</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="fu">llama_generate</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  ctx, <span class="st">&quot;Write a haiku about autumn.&quot;</span>,</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>  <span class="at">max_new_tokens =</span> <span class="dv">64</span><span class="dt">L</span>,</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>  <span class="at">temp           =</span> <span class="fl">0.7</span>,</span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>  <span class="at">top_p          =</span> <span class="fl">0.9</span>,</span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>  <span class="at">top_k          =</span> <span class="dv">40</span><span class="dt">L</span>,</span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a>  <span class="at">repeat_penalty =</span> <span class="fl">1.1</span></span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a>)</span></code></pre></div>
+<p>Pass <code>with_timings = TRUE</code> to get token throughput
+alongside the text.</p>
+<hr />
+</div>
+<div id="chat-models-and-templates" class="section level2">
+<h2>4. Chat models and templates</h2>
+<p>Instruction-tuned models expect their prompt wrapped in a chat
+template (<code>[INST]…[/INST]</code>, <code>&lt;|im_start|&gt;…</code>,
+etc.). <code>llama_chat_apply_template()</code> builds that prompt from
+a list of role/content messages:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>messages <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  <span class="fu">list</span>(<span class="at">role =</span> <span class="st">&quot;system&quot;</span>,    <span class="at">content =</span> <span class="st">&quot;You are a helpful assistant.&quot;</span>),</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="fu">list</span>(<span class="at">role =</span> <span class="st">&quot;user&quot;</span>,      <span class="at">content =</span> <span class="st">&quot;Name three primary colors.&quot;</span>)</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>)</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a>prompt <span class="ot">&lt;-</span> <span class="fu">llama_chat_apply_template</span>(messages)   <span class="co"># uses the model&#39;s built-in template</span></span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a><span class="fu">llama_generate</span>(ctx, prompt, <span class="at">max_new_tokens =</span> <span class="dv">64</span><span class="dt">L</span>)</span></code></pre></div>
+<p>For multi-turn chat with history management, use
+<code>chat_llamar()</code> instead — see
+<code>vignette(&quot;chat-and-agents&quot;)</code>.</p>
+<hr />
+</div>
+<div id="tokenization" class="section level2">
+<h2>5. Tokenization</h2>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>tokens <span class="ot">&lt;-</span> <span class="fu">llama_tokenize</span>(ctx, <span class="st">&quot;Hello, world!&quot;</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>tokens</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="fu">llama_detokenize</span>(ctx, tokens)</span></code></pre></div>
+<p>When tokenizing a prompt that already contains role markers from a
+chat template, set <code>parse_special = TRUE</code> so markers like
+<code>[INST]</code> become single control tokens rather than literal
+characters:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>prompt <span class="ot">&lt;-</span> <span class="fu">llama_chat_apply_template</span>(<span class="fu">list</span>(<span class="fu">list</span>(<span class="at">role =</span> <span class="st">&quot;user&quot;</span>, <span class="at">content =</span> <span class="st">&quot;hi&quot;</span>)))</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a><span class="fu">llama_tokenize</span>(ctx, prompt, <span class="at">parse_special =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
+<hr />
+</div>
+<div id="embeddings" class="section level2">
+<h2>6. Embeddings</h2>
+<p>Create the context in <strong>embedding mode</strong>, then extract
+vectors. Single text:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>emb_model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(<span class="st">&quot;embedding-model.gguf&quot;</span>)</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>emb_ctx   <span class="ot">&lt;-</span> <span class="fu">llama_new_context</span>(emb_model, <span class="at">embedding =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>v <span class="ot">&lt;-</span> <span class="fu">llama_embeddings</span>(emb_ctx, <span class="st">&quot;The quick brown fox&quot;</span>)</span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a><span class="fu">length</span>(v)</span></code></pre></div>
+<p>A batch of texts in one call:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>m <span class="ot">&lt;-</span> <span class="fu">llama_embed_batch</span>(emb_ctx, <span class="fu">c</span>(<span class="st">&quot;first text&quot;</span>, <span class="st">&quot;second text&quot;</span>, <span class="st">&quot;third text&quot;</span>))</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a><span class="fu">dim</span>(m)   <span class="co"># one row per input</span></span></code></pre></div>
+<div id="ragnar-compatible-provider" class="section level3">
+<h3>ragnar-compatible provider</h3>
+<p><code>embed_llamar()</code> is a higher-level helper that loads the
+model for you and returns a provider suitable for
+<code>ragnar_store_create(embed = ...)</code>. Called with a model only,
+it returns a closure (partial application); called with text, it returns
+a matrix.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a><span class="fu">library</span>(ragnar)</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a></span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>store <span class="ot">&lt;-</span> <span class="fu">ragnar_store_create</span>(</span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>  <span class="at">location =</span> <span class="st">&quot;store.duckdb&quot;</span>,</span>
+<span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a>  <span class="at">embed    =</span> <span class="fu">embed_llamar</span>(<span class="at">model =</span> <span class="st">&quot;embedding-model.gguf&quot;</span>, <span class="at">n_gpu_layers =</span> <span class="sc">-</span><span class="dv">1</span><span class="dt">L</span>)</span>
+<span id="cb11-6"><a href="#cb11-6" tabindex="-1"></a>)</span>
+<span id="cb11-7"><a href="#cb11-7" tabindex="-1"></a><span class="fu">ragnar_store_insert</span>(store, documents)</span>
+<span id="cb11-8"><a href="#cb11-8" tabindex="-1"></a><span class="fu">ragnar_store_build_index</span>(store)</span>
+<span id="cb11-9"><a href="#cb11-9" tabindex="-1"></a><span class="fu">ragnar_retrieve</span>(store, <span class="st">&quot;search query&quot;</span>)</span></code></pre></div>
+<p>Combine this with a local <code>chat_llamar()</code> for a fully
+local RAG stack — see <code>vignette(&quot;chat-and-agents&quot;)</code>.</p>
+<hr />
+</div>
+</div>
+<div id="serving-and-chatting" class="section level2">
+<h2>7. Serving and chatting</h2>
+<p>To talk to a model over HTTP, or to use it through the ellmer/ragnar
+toolchain, see <code>vignette(&quot;chat-and-agents&quot;)</code>:</p>
+<ul>
+<li><code>llama_serve_openai()</code> — OpenAI-compatible HTTP
+server.</li>
+<li><code>chat_llamar()</code> — an <code>ellmer::Chat</code> backed by
+a local model.</li>
+</ul>
+<hr />
+</div>
+<div id="see-also" class="section level2">
+<h2>See also</h2>
+<ul>
+<li><code>vignette(&quot;chat-and-agents&quot;)</code> — server, ellmer, ragnar,
+OpenCode.</li>
+<li><code>?llama_generate</code>,
+<code>?llama_chat_apply_template</code>, <code>?embed_llamar</code></li>
+<li>The package README for installation and GPU/Vulkan setup.</li>
+</ul>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

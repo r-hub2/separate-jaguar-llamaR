@@ -338,23 +338,25 @@ extern "C" SEXP r_llama_free_context(SEXP r_ctx) {
 // Tokenize / Detokenize
 // ============================================================
 
-extern "C" SEXP r_llama_tokenize(SEXP r_ctx, SEXP r_text, SEXP r_add_special) {
+extern "C" SEXP r_llama_tokenize(SEXP r_ctx, SEXP r_text, SEXP r_add_special,
+                                 SEXP r_parse_special) {
     llama_context * ctx = (llama_context *) R_ExternalPtrAddr(r_ctx);
     if (!ctx) Rf_error("llamaR: invalid context pointer");
 
     const llama_model * model = llama_get_model(ctx);
     const llama_vocab * vocab = llama_model_get_vocab(model);
 
-    const char * text       = CHAR(STRING_ELT(r_text, 0));
-    bool         add_special = LOGICAL(r_add_special)[0] != 0;
-    int          text_len   = (int) strlen(text);
+    const char * text          = CHAR(STRING_ELT(r_text, 0));
+    bool         add_special   = LOGICAL(r_add_special)[0] != 0;
+    bool         parse_special = LOGICAL(r_parse_special)[0] != 0;
+    int          text_len      = (int) strlen(text);
 
     // first pass: get required buffer size (returns negative on "need more space")
-    int n_tokens = llama_tokenize(vocab, text, text_len, NULL, 0, add_special, false);
+    int n_tokens = llama_tokenize(vocab, text, text_len, NULL, 0, add_special, parse_special);
     if (n_tokens < 0) n_tokens = -n_tokens;
 
     std::vector<llama_token> tokens(n_tokens);
-    int actual = llama_tokenize(vocab, text, text_len, tokens.data(), n_tokens, add_special, false);
+    int actual = llama_tokenize(vocab, text, text_len, tokens.data(), n_tokens, add_special, parse_special);
     if (actual < 0) {
         Rf_error("llamaR: tokenization failed");
     }
@@ -445,7 +447,10 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
     auto tic = clk::now();
 
     // --- tokenize prompt ---
-    int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, false);
+    // parse_special = true: the prompt has already been through the chat
+    // template, so role markers like [INST]/<|im_start|> are control tokens
+    // and must be parsed as such, not split into literal characters.
+    int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, true);
     if (n_tokens < 0) n_tokens = -n_tokens;
     if (n_tokens == 0) {
         Rf_error("llamaR: prompt produced zero tokens");
@@ -453,7 +458,7 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
 
     std::vector<llama_token> prompt_tokens(n_tokens);
     int actual = llama_tokenize(vocab, prompt, prompt_len,
-                                prompt_tokens.data(), n_tokens, true, false);
+                                prompt_tokens.data(), n_tokens, true, true);
     if (actual < 0) Rf_error("llamaR: tokenization failed");
     n_tokens = actual;
 
@@ -758,13 +763,15 @@ extern "C" SEXP r_llama_gen_begin(SEXP r_ctx, SEXP r_prompt,
     int prompt_len = (int) strlen(prompt);
 
     // --- tokenize prompt ---
-    int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, false);
+    // parse_special = true: prompt has been through the chat template, so its
+    // role markers are control tokens (see r_llama_generate for rationale).
+    int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, true);
     if (n_tokens < 0) n_tokens = -n_tokens;
     if (n_tokens == 0) Rf_error("llamaR: prompt produced zero tokens");
 
     std::vector<llama_token> prompt_tokens(n_tokens);
     int actual = llama_tokenize(vocab, prompt, prompt_len,
-                                prompt_tokens.data(), n_tokens, true, false);
+                                prompt_tokens.data(), n_tokens, true, true);
     if (actual < 0) Rf_error("llamaR: tokenization failed");
     n_tokens = actual;
 
@@ -1456,17 +1463,21 @@ extern "C" SEXP r_llama_chat_apply_template(SEXP r_tmpl, SEXP r_messages, SEXP r
 
     for (int i = 0; i < n_msg; i++) {
         SEXP msg = VECTOR_ELT(r_messages, i);
-        SEXP r_role = Rf_getAttrib(msg, sym_role);
-        SEXP r_content = Rf_getAttrib(msg, sym_content);
 
-        // Try list element access if attributes don't work
-        if (Rf_isNull(r_role)) {
-            r_role = VECTOR_ELT(msg, 0);
-            r_content = VECTOR_ELT(msg, 1);
+        // Resolve role and content independently and extract each string
+        // immediately, so no SEXP is held live across another allocating call
+        // (PROTECT-wise rchk-clean). r_role/r_content are scoped per branch.
+        {
+            SEXP r_role = Rf_getAttrib(msg, sym_role);
+            if (Rf_isNull(r_role)) r_role = VECTOR_ELT(msg, 0);
+            roles[i] = CHAR(STRING_ELT(r_role, 0));
+        }
+        {
+            SEXP r_content = Rf_getAttrib(msg, sym_content);
+            if (Rf_isNull(r_content)) r_content = VECTOR_ELT(msg, 1);
+            contents[i] = CHAR(STRING_ELT(r_content, 0));
         }
 
-        roles[i] = CHAR(STRING_ELT(r_role, 0));
-        contents[i] = CHAR(STRING_ELT(r_content, 0));
         messages[i].role = roles[i].c_str();
         messages[i].content = contents[i].c_str();
     }
@@ -1781,12 +1792,22 @@ extern "C" SEXP r_llama_set_abort_callback(SEXP r_ctx, SEXP r_fn) {
     llama_context * ctx = (llama_context *) R_ExternalPtrAddr(r_ctx);
     if (!ctx) Rf_error("llamaR: invalid context pointer");
 
-    if (r_fn == R_NilValue) {
-        // Clear callback
+    // Validate before mutating any state, so an error leaves the old callback
+    // intact rather than half-replaced.
+    if (r_fn != R_NilValue && !Rf_isFunction(r_fn)) {
+        Rf_error("llamaR: abort_callback must be a function or NULL");
+    }
+
+    // Release the previously preserved callback (if any) before replacing it,
+    // otherwise it leaks on the precious list and stays alive forever.
+    if (s_abort_callback != R_NilValue) {
+        R_ReleaseObject(s_abort_callback);
         s_abort_callback = R_NilValue;
+    }
+
+    if (r_fn == R_NilValue) {
         llama_set_abort_callback(ctx, NULL, NULL);
     } else {
-        if (!Rf_isFunction(r_fn)) Rf_error("llamaR: abort_callback must be a function or NULL");
         s_abort_callback = r_fn;
         R_PreserveObject(s_abort_callback);
         llama_set_abort_callback(ctx, r_abort_callback, NULL);
@@ -2252,7 +2273,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"r_llama_set_n_threads",         (DL_FUNC) &r_llama_set_n_threads,         3},
     {"r_llama_set_causal_attn",       (DL_FUNC) &r_llama_set_causal_attn,       2},
     // Tokenize / Detokenize / Token piece
-    {"r_llama_tokenize",              (DL_FUNC) &r_llama_tokenize,              3},
+    {"r_llama_tokenize",              (DL_FUNC) &r_llama_tokenize,              4},
     {"r_llama_detokenize",            (DL_FUNC) &r_llama_detokenize,            2},
     {"r_llama_token_to_piece",        (DL_FUNC) &r_llama_token_to_piece,        3},
     // Batch

@@ -8,6 +8,10 @@
 
 * `llama_serve_openai()` — serve a local GGUF model over an OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, streaming and blocking) via the optional `drogonR` package.
 
+## ellmer integration
+
+* `chat_llamar()` — returns an `ellmer::Chat` backed by a local model, connecting to a running server (`base_url=`) or spawning one (`model_path=`); `chat_llamar_stop()` stops a spawned server.
+
 ## Bug fixes
 
 * Long prompts no longer abort: prefill is now split into `llama_n_batch()`-sized chunks (was `GGML_ASSERT(n_tokens_all <= cparams.n_batch)`).

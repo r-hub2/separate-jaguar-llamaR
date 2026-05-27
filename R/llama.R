@@ -330,6 +330,11 @@ llama_free_context <- function(ctx) {
 #' @param ctx Context handle returned by [llama_new_context]
 #' @param text Character string to tokenize
 #' @param add_special Whether to add special tokens (BOS/EOS) as configured by the model
+#' @param parse_special Whether to parse control/special tokens (e.g. Mistral's
+#'   \code{[INST]}, ChatML's \code{<|im_start|>}) as single tokens rather than
+#'   as their literal characters. Use \code{TRUE} for a prompt produced by
+#'   [llama_chat_apply_template]; the default \code{FALSE} treats such markup as
+#'   plain text.
 #' @return An integer vector of token IDs as used by the model's vocabulary.
 #' @export
 #' @examples
@@ -343,10 +348,15 @@ llama_free_context <- function(ctx) {
 #'
 #' # Without special tokens
 #' tokens <- llama_tokenize(ctx, "Hello", add_special = FALSE)
+#'
+#' # Parse a templated prompt's role markers as control tokens
+#' prompt <- llama_chat_apply_template(list(list(role = "user", content = "hi")))
+#' tokens <- llama_tokenize(ctx, prompt, parse_special = TRUE)
 #' }
-llama_tokenize <- function(ctx, text, add_special = TRUE) {
+llama_tokenize <- function(ctx, text, add_special = TRUE, parse_special = FALSE) {
     stopifnot(is.character(text), length(text) == 1)
-    .Call("r_llama_tokenize", ctx, text, as.logical(add_special))
+    .Call("r_llama_tokenize", ctx, text,
+          as.logical(add_special), as.logical(parse_special))
 }
 
 #' Detokenize token IDs back to text
