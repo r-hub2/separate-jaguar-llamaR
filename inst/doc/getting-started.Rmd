@@ -7,7 +7,7 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, purl=FALSE}
 # Every chunk needs a GGUF model (and usually a GPU), so this vignette is
 # static: the code is shown but not run at build time.
 knitr::opts_chunk$set(eval = FALSE, purl = FALSE)
@@ -19,7 +19,7 @@ via [ggmlR](https://github.com/Zabis13/ggmlR). This vignette walks through the
 core workflow: get a model, load it, generate text, tokenize, and extract
 embeddings. For the chat/server side see `vignette("chat-and-agents")`.
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 library(llamaR)
 ```
 
@@ -30,7 +30,7 @@ library(llamaR)
 llamaR works with GGUF files. Download one from the Hugging Face Hub (cached
 under `~/.cache/llamaR/` by default):
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 # List the GGUF files in a repo
 llama_hf_list("TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
 
@@ -51,7 +51,7 @@ A **model** holds the weights; a **context** holds the working state (KV cache)
 for one generation session. Both are external pointers with GC finalizers, so
 explicit freeing is optional.
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 model <- llama_load_model(path, n_gpu_layers = -1L)   # -1 = offload all layers
 ctx   <- llama_new_context(model, n_ctx = 4096L)
 
@@ -65,13 +65,13 @@ and falls back to CPU otherwise.
 
 ## 3. Generating text
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 llama_generate(ctx, "The capital of France is", max_new_tokens = 32L)
 ```
 
 Sampling is controlled by arguments (set `temp = 0` for greedy decoding):
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 llama_generate(
   ctx, "Write a haiku about autumn.",
   max_new_tokens = 64L,
@@ -92,7 +92,7 @@ Instruction-tuned models expect their prompt wrapped in a chat template
 (`[INST]…[/INST]`, `<|im_start|>…`, etc.). `llama_chat_apply_template()` builds
 that prompt from a list of role/content messages:
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 messages <- list(
   list(role = "system",    content = "You are a helpful assistant."),
   list(role = "user",      content = "Name three primary colors.")
@@ -109,7 +109,7 @@ For multi-turn chat with history management, use `chat_llamar()` instead — see
 
 ## 5. Tokenization
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 tokens <- llama_tokenize(ctx, "Hello, world!")
 tokens
 
@@ -120,7 +120,7 @@ When tokenizing a prompt that already contains role markers from a chat
 template, set `parse_special = TRUE` so markers like `[INST]` become single
 control tokens rather than literal characters:
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 prompt <- llama_chat_apply_template(list(list(role = "user", content = "hi")))
 llama_tokenize(ctx, prompt, parse_special = TRUE)
 ```
@@ -131,7 +131,7 @@ llama_tokenize(ctx, prompt, parse_special = TRUE)
 
 Create the context in **embedding mode**, then extract vectors. Single text:
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 emb_model <- llama_load_model("embedding-model.gguf")
 emb_ctx   <- llama_new_context(emb_model, embedding = TRUE)
 
@@ -141,7 +141,7 @@ length(v)
 
 A batch of texts in one call:
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 m <- llama_embed_batch(emb_ctx, c("first text", "second text", "third text"))
 dim(m)   # one row per input
 ```
@@ -153,7 +153,7 @@ returns a provider suitable for `ragnar_store_create(embed = ...)`. Called with
 a model only, it returns a closure (partial application); called with text, it
 returns a matrix.
 
-```{r}
+```{r, eval=FALSE, purl=FALSE}
 library(ragnar)
 
 store <- ragnar_store_create(
