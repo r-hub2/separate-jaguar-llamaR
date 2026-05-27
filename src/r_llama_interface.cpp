@@ -1236,13 +1236,18 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
     }
 
     int n_embd = llama_model_n_embd(model);
+
+    // Copy out of the context's embedding buffer, then reset the flag, before
+    // building the R result — keeps r_result from being live across the
+    // llama_set_embeddings call (which rchk flags as allocating).
+    std::vector<float> emb_copy(emb, emb + n_embd);
+    llama_set_embeddings(ctx, false);
+
     SEXP r_result = PROTECT(Rf_allocVector(REALSXP, n_embd));
     for (int i = 0; i < n_embd; i++) {
-        REAL(r_result)[i] = (double) emb[i];
+        REAL(r_result)[i] = (double) emb_copy[i];
     }
     UNPROTECT(1);
-
-    llama_set_embeddings(ctx, false);
     return r_result;
 }
 
@@ -1444,10 +1449,15 @@ extern "C" SEXP r_llama_chat_apply_template(SEXP r_tmpl, SEXP r_messages, SEXP r
     std::vector<std::string> roles(n_msg);
     std::vector<std::string> contents(n_msg);
 
+    // Cache the symbols so Rf_install (an allocating call) runs once up front,
+    // not inside the loop where r_role/r_content would be live across it.
+    SEXP sym_role = Rf_install("role");
+    SEXP sym_content = Rf_install("content");
+
     for (int i = 0; i < n_msg; i++) {
         SEXP msg = VECTOR_ELT(r_messages, i);
-        SEXP r_role = Rf_getAttrib(msg, Rf_install("role"));
-        SEXP r_content = Rf_getAttrib(msg, Rf_install("content"));
+        SEXP r_role = Rf_getAttrib(msg, sym_role);
+        SEXP r_content = Rf_getAttrib(msg, sym_content);
 
         // Try list element access if attributes don't work
         if (Rf_isNull(r_role)) {
@@ -2124,7 +2134,8 @@ extern "C" SEXP r_llama_batch_init(SEXP r_n_tokens, SEXP r_embd, SEXP r_n_seq_ma
     struct llama_batch * batch = new llama_batch;
     *batch = llama_batch_init(n_tokens, embd, n_seq_max);
 
-    SEXP result = PROTECT(R_MakeExternalPtr(batch, Rf_mkString("llama_batch"), R_NilValue));
+    SEXP tag = PROTECT(Rf_mkString("llama_batch"));
+    SEXP result = PROTECT(R_MakeExternalPtr(batch, tag, R_NilValue));
     R_RegisterCFinalizer(result, [](SEXP x) {
         llama_batch * b = (llama_batch *) R_ExternalPtrAddr(x);
         if (b) {
@@ -2133,7 +2144,7 @@ extern "C" SEXP r_llama_batch_init(SEXP r_n_tokens, SEXP r_embd, SEXP r_n_seq_ma
             R_SetExternalPtrAddr(x, NULL);
         }
     });
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result;
 }
 
