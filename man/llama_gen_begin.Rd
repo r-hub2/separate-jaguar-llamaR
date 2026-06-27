@@ -21,7 +21,9 @@ llama_gen_begin(
   mirostat = 0L,
   mirostat_tau = 5,
   mirostat_eta = 0.1,
-  grammar = NULL
+  grammar = NULL,
+  trigger_patterns = NULL,
+  trigger_tokens = NULL
 )
 }
 \arguments{
@@ -58,6 +60,15 @@ llama_gen_begin(
 \item{mirostat_eta}{Mirostat learning rate (eta parameter)}
 
 \item{grammar}{GBNF grammar string for constrained generation (NULL = disabled)}
+
+\item{trigger_patterns}{Character vector of regular expressions that lazily
+activate a grammar (e.g. the prefix a model emits before a tool call). Only
+meaningful alongside a lazy \code{grammar}; \code{NULL} (default) applies the
+grammar from the first token. Supplied by \code{\link{llama_chat_build}}.}
+
+\item{trigger_tokens}{Integer vector of token IDs that lazily activate the
+grammar, the token-level counterpart to \code{trigger_patterns}. \code{NULL}
+(default) means none.}
 }
 \value{
 An external pointer holding the generation state. Pass it to

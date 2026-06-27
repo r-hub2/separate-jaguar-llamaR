@@ -342,18 +342,25 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 
 <p>llamaR turns a local GGUF model into a chat backend for the R
-ecosystem. You can talk to it three ways, from lowest to highest
+ecosystem. You can talk to it several ways, from lowest to highest
 level:</p>
 <ul>
 <li><strong>HTTP server</strong> — <code>llama_serve_openai()</code>
 exposes an OpenAI-compatible API any client can hit (OpenCode, the
 <code>openai</code> SDK, <code>curl</code>).</li>
+<li><strong>Anthropic server</strong> —
+<code>llama_serve_anthropic()</code> exposes an Anthropic Messages API
+so <strong>Claude Code</strong> runs against local inference (see
+section 7).</li>
 <li><strong>ellmer <code>Chat</code></strong> —
 <code>chat_llamar()</code> returns an <code>ellmer::Chat</code>, so the
 whole ellmer / ragnar toolchain works against local inference.</li>
 <li><strong>Command-line example</strong> —
 <code>inst/examples/chat.R</code> wraps both for quick use.</li>
 </ul>
+<p>Both servers share a tool-aware chat layer
+(<code>llama_chat_build()</code> / <code>llama_chat_parse()</code>) so
+tool-calling models work end to end (section 6).</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(llamaR)</span></code></pre></div>
 <hr />
 <div id="the-chat-object-chat_llamar" class="section level2">
@@ -475,26 +482,97 @@ local embeddings for the store, local generation for the chat.</p>
 <span id="cb9-11"><a href="#cb9-11" tabindex="-1"></a><span class="fu">ragnar_register_tool_retrieve</span>(chat, store)</span>
 <span id="cb9-12"><a href="#cb9-12" tabindex="-1"></a>chat<span class="sc">$</span><span class="fu">chat</span>(<span class="st">&quot;What do the documents say about X?&quot;</span>)</span></code></pre></div>
 <blockquote>
-<p><strong>Note.</strong> Tool calling is mediated by the OpenAI
-protocol, so it works only as far as the server implements it. The
-current server does not emit <code>tool_calls</code> yet, so a model
-will not autonomously invoke the registered retrieve tool. Plain chat
-and manual retrieval work today; automatic tool-driven retrieval is on
-the roadmap (see <code>TODO.md</code>).</p>
+<p><strong>Note.</strong> Tool calling is mediated by the chat protocol.
+Both servers emit <code>tool_calls</code> (the tool-aware chat layer,
+see section 6), so a tool-calling model can autonomously invoke the
+registered retrieve tool. Tool-calling quality is model-dependent —
+capable models (e.g. Qwen3) drive retrieval reliably; very small models
+may need manual retrieval.</p>
 </blockquote>
 <hr />
 </div>
+<div id="tool-calling-llama_chat_build-llama_chat_parse" class="section level2">
+<h2>5. Tool calling: <code>llama_chat_build()</code> /
+<code>llama_chat_parse()</code></h2>
+<p>The servers above call a lower-level, tool-aware chat layer you can
+also use directly. <code>llama_chat_build()</code> applies the model’s
+chat template to messages <strong>plus tool definitions</strong> and
+returns everything needed to constrain and parse a tool call;
+<code>llama_chat_parse()</code> turns the raw output back into
+structured tool calls.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>tools <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="fu">list</span>(</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>  <span class="at">type =</span> <span class="st">&quot;function&quot;</span>,</span>
+<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>  <span class="st">&quot;function&quot;</span> <span class="ot">=</span> <span class="fu">list</span>(</span>
+<span id="cb10-4"><a href="#cb10-4" tabindex="-1"></a>    <span class="at">name        =</span> <span class="st">&quot;get_weather&quot;</span>,</span>
+<span id="cb10-5"><a href="#cb10-5" tabindex="-1"></a>    <span class="at">description =</span> <span class="st">&quot;Get the current weather for a city.&quot;</span>,</span>
+<span id="cb10-6"><a href="#cb10-6" tabindex="-1"></a>    <span class="at">parameters  =</span> <span class="fu">list</span>(</span>
+<span id="cb10-7"><a href="#cb10-7" tabindex="-1"></a>      <span class="at">type       =</span> <span class="st">&quot;object&quot;</span>,</span>
+<span id="cb10-8"><a href="#cb10-8" tabindex="-1"></a>      <span class="at">properties =</span> <span class="fu">list</span>(<span class="at">city =</span> <span class="fu">list</span>(<span class="at">type =</span> <span class="st">&quot;string&quot;</span>)),</span>
+<span id="cb10-9"><a href="#cb10-9" tabindex="-1"></a>      <span class="at">required   =</span> <span class="fu">list</span>(<span class="st">&quot;city&quot;</span>)</span>
+<span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a>    )</span>
+<span id="cb10-11"><a href="#cb10-11" tabindex="-1"></a>  )</span>
+<span id="cb10-12"><a href="#cb10-12" tabindex="-1"></a>))</span>
+<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a></span>
+<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a>messages <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="fu">list</span>(<span class="at">role =</span> <span class="st">&quot;user&quot;</span>, <span class="at">content =</span> <span class="st">&quot;What&#39;s the weather in Paris?&quot;</span>))</span>
+<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a></span>
+<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a>built <span class="ot">&lt;-</span> <span class="fu">llama_chat_build</span>(model, messages, <span class="at">tools =</span> tools)</span>
+<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co"># built$prompt   — the formatted prompt to feed the model</span></span>
+<span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co"># built$grammar  — grammar that constrains tool-call output</span></span>
+<span id="cb10-19"><a href="#cb10-19" tabindex="-1"></a><span class="co"># built$format   — format id to pass to llama_chat_parse()</span></span>
+<span id="cb10-20"><a href="#cb10-20" tabindex="-1"></a><span class="co"># built$grammar_lazy, built$trigger_patterns, built$trigger_tokens,</span></span>
+<span id="cb10-21"><a href="#cb10-21" tabindex="-1"></a><span class="co"># built$additional_stops, built$preserved_tokens, built$parser</span></span></code></pre></div>
+<p>Generate against the returned prompt and grammar, then parse. Pass
+the lazy triggers <strong>only when <code>built$grammar_lazy</code> is
+<code>TRUE</code></strong>:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>lazy <span class="ot">&lt;-</span> <span class="fu">isTRUE</span>(built<span class="sc">$</span>grammar_lazy)</span>
+<span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>raw <span class="ot">&lt;-</span> <span class="fu">llama_generate</span>(</span>
+<span id="cb11-3"><a href="#cb11-3" tabindex="-1"></a>  ctx, built<span class="sc">$</span>prompt,</span>
+<span id="cb11-4"><a href="#cb11-4" tabindex="-1"></a>  <span class="at">grammar          =</span> built<span class="sc">$</span>grammar,</span>
+<span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a>  <span class="at">trigger_patterns =</span> <span class="cf">if</span> (lazy) built<span class="sc">$</span>trigger_patterns,</span>
+<span id="cb11-6"><a href="#cb11-6" tabindex="-1"></a>  <span class="at">trigger_tokens   =</span> <span class="cf">if</span> (lazy) built<span class="sc">$</span>trigger_tokens</span>
+<span id="cb11-7"><a href="#cb11-7" tabindex="-1"></a>)</span>
+<span id="cb11-8"><a href="#cb11-8" tabindex="-1"></a></span>
+<span id="cb11-9"><a href="#cb11-9" tabindex="-1"></a>parsed <span class="ot">&lt;-</span> <span class="fu">llama_chat_parse</span>(raw, <span class="at">format =</span> built<span class="sc">$</span>format, <span class="at">parser =</span> built<span class="sc">$</span>parser)</span>
+<span id="cb11-10"><a href="#cb11-10" tabindex="-1"></a>parsed<span class="sc">$</span>content        <span class="co"># assistant text (may be empty for a pure tool call)</span></span>
+<span id="cb11-11"><a href="#cb11-11" tabindex="-1"></a>parsed<span class="sc">$</span>tool_calls     <span class="co"># data frame: name, arguments (JSON string), id</span></span></code></pre></div>
+<p>Tool-calling quality is model-dependent: capable models (e.g. Qwen3)
+emit clean tool calls; very small models are less reliable.</p>
+<hr />
+</div>
+<div id="claude-code-on-a-local-model-llama_serve_anthropic" class="section level2">
+<h2>6. Claude Code on a local model:
+<code>llama_serve_anthropic()</code></h2>
+<p><code>llama_serve_anthropic()</code> exposes an <strong>Anthropic
+Messages API</strong> so Claude Code (or any Anthropic SDK client) runs
+against local inference. It uses the tool-aware layer from section 5 and
+streams the Anthropic SSE event sequence. Like the OpenAI server it
+needs the optional <strong>drogonR</strong> package.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a><span class="fu">llama_serve_anthropic</span>(<span class="st">&quot;model.gguf&quot;</span>, <span class="at">port =</span> <span class="dv">11435</span><span class="dt">L</span>, <span class="at">n_ctx =</span> <span class="dv">32768</span><span class="dt">L</span>)</span></code></pre></div>
+<p>It serves <code>POST /v1/messages</code> and
+<code>GET /v1/models</code>. Point Claude Code at it via environment
+variables:</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_BASE_URL</span><span class="op">=</span>http://127.0.0.1:11435</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a><span class="bu">export</span> <span class="va">ANTHROPIC_API_KEY</span><span class="op">=</span>local   <span class="co"># any non-empty value</span></span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a><span class="ex">claude</span></span></code></pre></div>
+<p><code>enable_thinking</code> (default <code>FALSE</code>) toggles the
+chat template’s reasoning mode for hybrid thinking models (Qwen3.5,
+etc.). It is off by default so Claude Code gets direct answers and fast
+tool calls; set it <code>TRUE</code> (and raise <code>max_tokens</code>)
+to keep the reasoning trace. A runnable launcher lives at
+<code>inst/examples/claude_code_launcher.sh</code>.</p>
+<hr />
+</div>
 <div id="concurrency" class="section level2">
-<h2>5. Concurrency</h2>
+<h2>7. Concurrency</h2>
 <p>The server is <strong>single-sequence</strong>: it handles one
 request at a time on the main R thread. That is enough for a single
 local user or agent. For parallel sessions, run a pool of servers on
 different ports and create one <code>chat_llamar(base_url=)</code> per
 worker — the worker-pool architecture is described in
 <code>TODO.md</code>.</p>
-<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>ports <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">11434</span><span class="dt">L</span>, <span class="dv">11435</span><span class="dt">L</span>, <span class="dv">11436</span><span class="dt">L</span>)</span>
-<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>chats <span class="ot">&lt;-</span> <span class="fu">lapply</span>(ports, <span class="cf">function</span>(p)</span>
-<span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>  <span class="fu">chat_llamar</span>(<span class="at">base_url =</span> <span class="fu">sprintf</span>(<span class="st">&quot;http://127.0.0.1:%d/v1&quot;</span>, p)))</span></code></pre></div>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>ports <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">11434</span><span class="dt">L</span>, <span class="dv">11435</span><span class="dt">L</span>, <span class="dv">11436</span><span class="dt">L</span>)</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>chats <span class="ot">&lt;-</span> <span class="fu">lapply</span>(ports, <span class="cf">function</span>(p)</span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a>  <span class="fu">chat_llamar</span>(<span class="at">base_url =</span> <span class="fu">sprintf</span>(<span class="st">&quot;http://127.0.0.1:%d/v1&quot;</span>, p)))</span></code></pre></div>
 <hr />
 </div>
 <div id="see-also" class="section level2">
@@ -502,9 +580,12 @@ worker — the worker-pool architecture is described in
 <ul>
 <li><code>vignette(&quot;getting-started&quot;)</code> — the rest of the
 package.</li>
-<li><code>?chat_llamar</code>, <code>?llama_serve_openai</code></li>
+<li><code>?chat_llamar</code>, <code>?llama_serve_openai</code>,
+<code>?llama_serve_anthropic</code></li>
+<li><code>?llama_chat_build</code>, <code>?llama_chat_parse</code></li>
 <li><code>inst/examples/chat.R</code>,
-<code>inst/examples/serve_openai.R</code></li>
+<code>inst/examples/serve_openai.R</code>,
+<code>inst/examples/claude_code_launcher.sh</code></li>
 </ul>
 </div>
 

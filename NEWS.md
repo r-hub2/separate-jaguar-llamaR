@@ -1,20 +1,18 @@
+# llamaR 0.2.5
+
+* Engine updated to upstream llama.cpp (expanded architecture support, including Qwen3.5).
+* Added multimodal (vision/OCR) support via the mtmd subsystem.
+* Added tool calling support with chat templates and structured output parsing.
+* Added Anthropic Messages API-compatible server (`llama_serve_anthropic`) for local models (Claude Code support).
+* Added `enable_thinking` argument to `llama_chat_build()` (and `llama_serve_anthropic()`) to toggle the reasoning mode of hybrid thinking models.
+
+---
+
 # llamaR 0.2.4
 
-## Streaming generation
-
 * `llama_gen_begin()` / `llama_gen_next()` / `llama_gen_end()` — token-by-token generation matching `llama_generate()` output, with valid-UTF-8 chunks.
-
-## OpenAI-compatible server
-
 * `llama_serve_openai()` — serve a local GGUF model over an OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, streaming and blocking) via the optional `drogonR` package.
-
-## ellmer integration
-
 * `chat_llamar()` — returns an `ellmer::Chat` backed by a local model, connecting to a running server (`base_url=`) or spawning one (`model_path=`); `chat_llamar_stop()` stops a spawned server.
-
-## Bug fixes
-
-* Long prompts no longer abort: prefill is now split into `llama_n_batch()`-sized chunks (was `GGML_ASSERT(n_tokens_all <= cparams.n_batch)`).
 
 ---
 
@@ -29,10 +27,6 @@
 * `llama_n_threads()` / `llama_n_threads_batch()` — read back thread counts set via `llama_set_threads()`.
 * `llama_pooling_type()` — pooling type of the context as a string (`"none"`, `"mean"`, `"cls"`, `"last"`, `"rank"`).
 
-## Bug fixes
-
-* Fixed macOS compilation error: removed `fflush` macro from `r_llama_compat.h`
-  that broke `std::fflush` in `<fstream>` (Apple clang / libc++).
 
 ## Logits
 
