@@ -27,7 +27,7 @@ VignetteBuilder: knitr
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 NeedsCompilation: yes
-Packaged: 2026-06-28 07:43:08 UTC; yuri
+Packaged: 2026-06-30 21:08:12 UTC; yuri
 Author: Yuri Baramykov [aut, cre] (<https://orcid.org/0009-0000-7627-4217>),
   Georgi Gerganov [cph] (Author of the 'llama.cpp' library included in
     src/)
