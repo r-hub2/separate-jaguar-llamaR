@@ -18,12 +18,20 @@
 #undef length
 #endif
 
+#include "r_llama_throw.h"  // llamar_error(): throws instead of longjmp-ing
+
 // Address of an externalptr argument, or NULL for a handle that has already
 // been freed. Callers that accept NULL are the idempotent free_* entry points;
 // everything else should use llamar_ptr_arg.
+//
+// NB: these report failures with llamar_error(), which throws. Rf_error()'s
+// longjmp would skip the destructors of any C++ object live in the calling
+// entry point, leaking its heap allocation. Every caller therefore has to sit
+// inside an LLAMAR_ENTRYPOINT_BEGIN/END pair, which turns the exception back
+// into an R error at the extern "C" boundary.
 static inline void * llamar_ptr_addr_or_null(SEXP x, const char * what) {
     if (TYPEOF(x) != EXTPTRSXP) {
-        Rf_error("llamaR: invalid %s pointer", what);
+        llamar_error("llamaR: invalid %s pointer", what);
     }
     return R_ExternalPtrAddr(x);
 }
@@ -31,6 +39,6 @@ static inline void * llamar_ptr_addr_or_null(SEXP x, const char * what) {
 // As above, but a freed (NULL) handle is an error too.
 static inline void * llamar_ptr_arg(SEXP x, const char * what) {
     void * p = llamar_ptr_addr_or_null(x, what);
-    if (!p) Rf_error("llamaR: invalid %s pointer", what);
+    if (!p) llamar_error("llamaR: invalid %s pointer", what);
     return p;
 }

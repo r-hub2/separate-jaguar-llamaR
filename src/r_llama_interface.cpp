@@ -16,7 +16,8 @@
 #undef length
 #endif
 
-#include "r_llama_ptr.h"  // type-checked externalptr arguments
+#include "r_llama_ptr.h"    // type-checked externalptr arguments
+#include "r_llama_throw.h"  // llamar_error(): throws instead of longjmp-ing
 
 #include "llama.h"
 #include "llama-ext.h"  // [llamaR] llama_get_memory_breakdown (master moved it here)
@@ -162,24 +163,32 @@ static void gen_state_finalizer(SEXP x) {
 // ============================================================
 
 extern "C" SEXP r_llama_version(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_mkString("0.1.1");
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_supports_gpu(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
     return Rf_ScalarLogical(llama_supports_gpu_offload() ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_set_verbosity(SEXP r_level) {
+    LLAMAR_ENTRYPOINT_BEGIN
     int level = INTEGER(r_level)[0];
     if (level < 0) level = 0;
     if (level > 3) level = 3;
     log_verbosity = level;
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_verbosity(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarInteger(log_verbosity);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -187,20 +196,25 @@ extern "C" SEXP r_llama_get_verbosity(void) {
 // ============================================================
 
 extern "C" SEXP r_llama_time_us(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarReal((double) llama_time_us());
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_numa_init(SEXP r_strategy) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
     int strategy = INTEGER(r_strategy)[0];
     if (strategy < 0 || strategy >= GGML_NUMA_STRATEGY_COUNT)
-        Rf_error("llamaR: invalid NUMA strategy %d (valid: 0..%d)", strategy,
-                 GGML_NUMA_STRATEGY_COUNT - 1);
+        llamar_error("llamaR: invalid NUMA strategy %d (valid: 0..%d)", strategy,
+                     GGML_NUMA_STRATEGY_COUNT - 1);
     llama_numa_init((enum ggml_numa_strategy) strategy);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_backend_devices(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
     size_t n = ggml_backend_dev_count();
 
@@ -242,6 +256,7 @@ extern "C" SEXP r_llama_backend_devices(void) {
 
     UNPROTECT(6);
     return df;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -285,7 +300,7 @@ static void llamar_model_params_from_sexp(struct llama_model_params & mparams,
                         dev = ggml_backend_dev_get((size_t) idx);
                 }
             }
-            if (!dev) Rf_error("llamaR: device not found: '%s'", dev_name);
+            if (!dev) llamar_error("llamaR: device not found: '%s'", dev_name);
             devs.push_back(dev);
         }
         devs.push_back(nullptr);  // NULL-terminated
@@ -295,6 +310,7 @@ static void llamar_model_params_from_sexp(struct llama_model_params & mparams,
 
 extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers, SEXP r_devices,
                                    SEXP r_split_mode, SEXP r_use_mmap, SEXP r_use_mlock) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
@@ -306,13 +322,14 @@ extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers, SEXP r_devi
 
     llama_model * model = llama_model_load_from_file(path, mparams);
     if (!model) {
-        Rf_error("llamaR: failed to load model from '%s'", path);
+        llamar_error("llamaR: failed to load model from '%s'", path);
     }
 
     SEXP result = PROTECT(R_MakeExternalPtr(model, R_NilValue, R_NilValue));
     R_RegisterCFinalizer(result, model_finalizer);
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Load a model whose GGUF is split across several files with a naming scheme
@@ -320,13 +337,14 @@ extern "C" SEXP r_llama_load_model(SEXP r_path, SEXP r_n_gpu_layers, SEXP r_devi
 extern "C" SEXP r_llama_load_model_from_splits(SEXP r_paths, SEXP r_n_gpu_layers,
                                                SEXP r_devices, SEXP r_split_mode,
                                                SEXP r_use_mmap, SEXP r_use_mlock) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
 
     if (TYPEOF(r_paths) != STRSXP) {
-        Rf_error("llamaR: paths must be a character vector");
+        llamar_error("llamaR: paths must be a character vector");
     }
     const int n_paths = (int) Rf_length(r_paths);
-    if (n_paths == 0) Rf_error("llamaR: paths must be non-empty");
+    if (n_paths == 0) llamar_error("llamaR: paths must be non-empty");
 
     std::vector<const char *> paths;
     paths.reserve(n_paths);
@@ -342,14 +360,15 @@ extern "C" SEXP r_llama_load_model_from_splits(SEXP r_paths, SEXP r_n_gpu_layers
     llama_model * model = llama_model_load_from_splits(paths.data(),
                                                        (size_t) n_paths, mparams);
     if (!model) {
-        Rf_error("llamaR: failed to load model from %d splits (first: '%s')",
-                 n_paths, paths[0]);
+        llamar_error("llamaR: failed to load model from %d splits (first: '%s')",
+                     n_paths, paths[0]);
     }
 
     SEXP result = PROTECT(R_MakeExternalPtr(model, R_NilValue, R_NilValue));
     R_RegisterCFinalizer(result, model_finalizer);
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // llama_split_path/_prefix take a zero-based split_no and print split_no + 1,
@@ -362,20 +381,21 @@ static int llamar_split_no_from_r(SEXP r_split_no, SEXP r_split_count) {
     const int split_no    = INTEGER(r_split_no)[0];
     const int split_count = INTEGER(r_split_count)[0];
     if (split_no == NA_INTEGER || split_count == NA_INTEGER) {
-        Rf_error("llamaR: split_no and split_count must not be NA");
+        llamar_error("llamaR: split_no and split_count must not be NA");
     }
     if (split_count < 1) {
-        Rf_error("llamaR: split_count must be at least 1, got %d", split_count);
+        llamar_error("llamaR: split_count must be at least 1, got %d", split_count);
     }
     if (split_no < 1 || split_no > split_count) {
-        Rf_error("llamaR: split_no must be between 1 and split_count (%d), got %d",
-                 split_count, split_no);
+        llamar_error("llamaR: split_no must be between 1 and split_count (%d), got %d",
+                     split_count, split_no);
     }
     return split_no - 1;
 }
 
 // Build the path of one chunk of a split GGUF from its prefix.
 extern "C" SEXP r_llama_split_path(SEXP r_prefix, SEXP r_split_no, SEXP r_split_count) {
+    LLAMAR_ENTRYPOINT_BEGIN
     const char * prefix = CHAR(STRING_ELT(r_prefix, 0));
     const int split_no    = llamar_split_no_from_r(r_split_no, r_split_count);
     const int split_count = INTEGER(r_split_count)[0];
@@ -385,12 +405,14 @@ extern "C" SEXP r_llama_split_path(SEXP r_prefix, SEXP r_split_no, SEXP r_split_
     std::vector<char> buf(4096, '\0');
     const int32_t len = llama_split_path(buf.data(), buf.size(), prefix,
                                          split_no, split_count);
-    if (len <= 0) Rf_error("llamaR: failed to build split path (prefix too long?)");
+    if (len <= 0) llamar_error("llamaR: failed to build split path (prefix too long?)");
     return Rf_mkString(buf.data());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Recover the prefix from a split path, when split_no/split_count match it.
 extern "C" SEXP r_llama_split_prefix(SEXP r_path, SEXP r_split_no, SEXP r_split_count) {
+    LLAMAR_ENTRYPOINT_BEGIN
     const char * path = CHAR(STRING_ELT(r_path, 0));
     const int split_no    = llamar_split_no_from_r(r_split_no, r_split_count);
     const int split_count = INTEGER(r_split_count)[0];
@@ -402,9 +424,11 @@ extern "C" SEXP r_llama_split_prefix(SEXP r_path, SEXP r_split_no, SEXP r_split_
     // error, so report it as NA rather than failing.
     if (len <= 0) return Rf_ScalarString(NA_STRING);
     return Rf_mkString(buf.data());
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_free_model(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     // Freeing an already-freed handle is a no-op, so NULL is accepted here;
     // the type still has to be right before anything is written back to it.
     llama_model * model = (llama_model *) llamar_ptr_addr_or_null(r_model, "model");
@@ -413,9 +437,11 @@ extern "C" SEXP r_llama_free_model(SEXP r_model) {
         R_SetExternalPtrAddr(r_model, NULL);
     }
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_info(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -444,6 +470,7 @@ extern "C" SEXP r_llama_model_info(SEXP r_model) {
 
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -455,6 +482,7 @@ extern "C" SEXP r_llama_new_context(SEXP r_model, SEXP r_n_ctx,
                                     SEXP r_n_batch, SEXP r_n_ubatch,
                                     SEXP r_n_seq_max,
                                     SEXP r_flash_attn, SEXP r_embedding) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     bool embedding = LOGICAL(r_embedding)[0];
@@ -474,7 +502,7 @@ extern "C" SEXP r_llama_new_context(SEXP r_model, SEXP r_n_ctx,
 
     llama_context * ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
-        Rf_error("llamaR: failed to create context");
+        llamar_error("llamaR: failed to create context");
     }
 
     if (embedding) {
@@ -487,6 +515,7 @@ extern "C" SEXP r_llama_new_context(SEXP r_model, SEXP r_n_ctx,
     R_RegisterCFinalizer(result, context_finalizer);
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Helper: check if context was created in embedding mode
@@ -499,12 +528,14 @@ static bool ctx_is_embedding(SEXP r_ctx) {
 }
 
 extern "C" SEXP r_llama_free_context(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = (llama_context *) llamar_ptr_addr_or_null(r_ctx, "context");
     if (ctx) {
         llama_free(ctx);
         R_SetExternalPtrAddr(r_ctx, NULL);
     }
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -513,6 +544,7 @@ extern "C" SEXP r_llama_free_context(SEXP r_ctx) {
 
 extern "C" SEXP r_llama_tokenize(SEXP r_ctx, SEXP r_text, SEXP r_add_special,
                                  SEXP r_parse_special) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -530,7 +562,7 @@ extern "C" SEXP r_llama_tokenize(SEXP r_ctx, SEXP r_text, SEXP r_add_special,
     std::vector<llama_token> tokens(n_tokens);
     int actual = llama_tokenize(vocab, text, text_len, tokens.data(), n_tokens, add_special, parse_special);
     if (actual < 0) {
-        Rf_error("llamaR: tokenization failed");
+        llamar_error("llamaR: tokenization failed");
     }
 
     SEXP r_result = PROTECT(Rf_allocVector(INTSXP, actual));
@@ -539,9 +571,11 @@ extern "C" SEXP r_llama_tokenize(SEXP r_ctx, SEXP r_text, SEXP r_add_special,
     }
     UNPROTECT(1);
     return r_result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_detokenize(SEXP r_ctx, SEXP r_tokens) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -563,6 +597,7 @@ extern "C" SEXP r_llama_detokenize(SEXP r_ctx, SEXP r_tokens) {
     text[actual] = '\0';
 
     return Rf_mkString(text.data());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -714,7 +749,7 @@ static llamar_sampler_params llamar_sampler_params_from_sexp(SEXP r_params) {
     llamar_sampler_params p;
     if (Rf_isNull(r_params)) return p;
     if (!Rf_isNewList(r_params)) {
-        Rf_error("llamaR: sampler parameters must be a named list");
+        llamar_error("llamaR: sampler parameters must be a named list");
     }
 
     llamar_get_float(r_params, "temp",           &p.temp);
@@ -750,7 +785,7 @@ static llamar_sampler_params llamar_sampler_params_from_sexp(SEXP r_params) {
     SEXP r_breakers = llamar_list_elt(r_params, "dry_sequence_breakers");
     if (!Rf_isNull(r_breakers)) {
         if (TYPEOF(r_breakers) != STRSXP) {
-            Rf_error("llamaR: dry_sequence_breakers must be a character vector");
+            llamar_error("llamaR: dry_sequence_breakers must be a character vector");
         }
         p.dry_sequence_breakers.clear();
         const int n = (int) Rf_length(r_breakers);
@@ -772,14 +807,14 @@ static llamar_sampler_params llamar_sampler_params_from_sexp(SEXP r_params) {
         SEXP r_tok = llamar_list_elt(r_lb, "token");
         SEXP r_val = llamar_list_elt(r_lb, "bias");
         if (Rf_isNull(r_tok) || Rf_isNull(r_val)) {
-            Rf_error("llamaR: logit_bias must be a list with 'token' and 'bias'");
+            llamar_error("llamaR: logit_bias must be a list with 'token' and 'bias'");
         }
         SEXP tok = PROTECT(Rf_coerceVector(r_tok, INTSXP));
         SEXP val = PROTECT(Rf_coerceVector(r_val, REALSXP));
         const int n = (int) Rf_length(tok);
         if ((int) Rf_length(val) != n) {
-            UNPROTECT(2);
-            Rf_error("llamaR: logit_bias 'token' and 'bias' must have equal length");
+            UNPROTECT(2);  // balance the stack before unwinding
+            llamar_error("llamaR: logit_bias 'token' and 'bias' must have equal length");
         }
         p.logit_bias.reserve(n);
         for (int i = 0; i < n; i++) {
@@ -821,7 +856,7 @@ static bool llamar_is_chain_arg(SEXP r_sampler) {
 static llama_sampler * llamar_chain_copy_for_generation(SEXP r_sampler, bool reset_state) {
     llamar_sampler_handle * h = llamar_chain_handle_get(r_sampler);
     llama_sampler * copy = llama_sampler_clone(llamar_handle_chain_ptr(h));
-    if (!copy) Rf_error("llamaR: this sampler chain cannot be copied");
+    if (!copy) llamar_error("llamaR: this sampler chain cannot be copied");
     if (reset_state) llama_sampler_reset(copy);
     return copy;
 }
@@ -922,6 +957,7 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
                                   SEXP r_grammar, SEXP r_with_timings,
                                   SEXP r_trigger_patterns, SEXP r_trigger_tokens,
                                   SEXP r_sampler_reset) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -960,13 +996,13 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
     int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, true);
     if (n_tokens < 0) n_tokens = -n_tokens;
     if (n_tokens == 0) {
-        Rf_error("llamaR: prompt produced zero tokens");
+        llamar_error("llamaR: prompt produced zero tokens");
     }
 
     std::vector<llama_token> prompt_tokens(n_tokens);
     int actual = llama_tokenize(vocab, prompt, prompt_len,
                                 prompt_tokens.data(), n_tokens, true, true);
-    if (actual < 0) Rf_error("llamaR: tokenization failed");
+    if (actual < 0) llamar_error("llamaR: tokenization failed");
     n_tokens = actual;
 
     if (with_timings) {
@@ -1012,8 +1048,8 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
             batch = llama_batch_get_one(prompt_tokens.data() + off, n_chunk);
             if (llama_decode(ctx, batch) != 0) {
                 llama_sampler_free(smpl);
-                Rf_error("llamaR: failed to process prompt (chunk at offset %d of %d)",
-                         off, n_tokens);
+                llamar_error("llamaR: failed to process prompt (chunk at offset %d of %d)",
+                             off, n_tokens);
             }
         }
     }
@@ -1069,7 +1105,7 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
         batch = llama_batch_get_one(&current_token, 1);
         if (llama_decode(ctx, batch) != 0) {
             llama_sampler_free(smpl);
-            Rf_error("llamaR: failed during token generation");
+            llamar_error("llamaR: failed during token generation");
         }
         if (with_timings) {
             t_decode_dispatch_ms += std::chrono::duration<double, std::milli>(clk::now() - t_d0).count();
@@ -1180,6 +1216,7 @@ extern "C" SEXP r_llama_generate(SEXP r_ctx, SEXP r_prompt,
     }
     UNPROTECT(1);
     return r_text;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -1222,6 +1259,7 @@ extern "C" SEXP r_llama_gen_begin(SEXP r_ctx, SEXP r_prompt,
                                   SEXP r_grammar,
                                   SEXP r_trigger_patterns, SEXP r_trigger_tokens,
                                   SEXP r_sampler_reset) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -1242,12 +1280,12 @@ extern "C" SEXP r_llama_gen_begin(SEXP r_ctx, SEXP r_prompt,
     // role markers are control tokens (see r_llama_generate for rationale).
     int n_tokens = llama_tokenize(vocab, prompt, prompt_len, NULL, 0, true, true);
     if (n_tokens < 0) n_tokens = -n_tokens;
-    if (n_tokens == 0) Rf_error("llamaR: prompt produced zero tokens");
+    if (n_tokens == 0) llamar_error("llamaR: prompt produced zero tokens");
 
     std::vector<llama_token> prompt_tokens(n_tokens);
     int actual = llama_tokenize(vocab, prompt, prompt_len,
                                 prompt_tokens.data(), n_tokens, true, true);
-    if (actual < 0) Rf_error("llamaR: tokenization failed");
+    if (actual < 0) llamar_error("llamaR: tokenization failed");
     n_tokens = actual;
 
     // --- build sampler chain (identical to r_llama_generate) ---
@@ -1277,8 +1315,8 @@ extern "C" SEXP r_llama_gen_begin(SEXP r_ctx, SEXP r_prompt,
         struct llama_batch batch = llama_batch_get_one(prompt_tokens.data() + off, n_chunk);
         if (llama_decode(ctx, batch) != 0) {
             llama_sampler_free(smpl);
-            Rf_error("llamaR: failed to process prompt (chunk at offset %d of %d)",
-                     off, n_tokens);
+            llamar_error("llamaR: failed to process prompt (chunk at offset %d of %d)",
+                         off, n_tokens);
         }
     }
 
@@ -1293,6 +1331,7 @@ extern "C" SEXP r_llama_gen_begin(SEXP r_ctx, SEXP r_prompt,
     R_RegisterCFinalizerEx(ptr, gen_state_finalizer, TRUE);
     UNPROTECT(1);
     return ptr;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Begin generation from an ALREADY-PREFILLED context, without clearing the KV
@@ -1307,6 +1346,7 @@ extern "C" SEXP r_llama_gen_begin_at(SEXP r_ctx, SEXP r_n_past,
                                      SEXP r_grammar,
                                      SEXP r_trigger_patterns, SEXP r_trigger_tokens,
                                      SEXP r_sampler_reset) {
+    LLAMAR_ENTRYPOINT_BEGIN
     (void) r_n_past;
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
@@ -1345,6 +1385,7 @@ extern "C" SEXP r_llama_gen_begin_at(SEXP r_ctx, SEXP r_n_past,
     R_RegisterCFinalizerEx(ptr, gen_state_finalizer, TRUE);
     UNPROTECT(1);
     return ptr;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // One generation step. Returns a length-1 character vector with the next
@@ -1352,6 +1393,7 @@ extern "C" SEXP r_llama_gen_begin_at(SEXP r_ctx, SEXP r_n_past,
 // reached or token budget exhausted). Holds back an incomplete trailing
 // UTF-8 char until the next call; r_llama_gen_end() flushes any remainder.
 extern "C" SEXP r_llama_gen_next(SEXP r_state) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_gen_state * st = llamar_gen_state_arg(r_state);
     if (st->done || st->n_remaining <= 0) {
         st->done = true;
@@ -1384,7 +1426,7 @@ extern "C" SEXP r_llama_gen_next(SEXP r_state) {
     struct llama_batch batch = llama_batch_get_one(&tok, 1);
     if (llama_decode(st->ctx, batch) != 0) {
         st->done = true;
-        Rf_error("llamaR: failed during token generation");
+        llamar_error("llamaR: failed during token generation");
     }
 
     // Emit everything except a possibly-incomplete trailing UTF-8 char, which
@@ -1400,11 +1442,13 @@ extern "C" SEXP r_llama_gen_next(SEXP r_state) {
     st->utf8_buf.erase(0, emit);
     UNPROTECT(1);
     return r_text;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Flush any bytes still held in the carry buffer and mark the state done.
 // Safe to call multiple times. The sampler is freed by the GC finalizer.
 extern "C" SEXP r_llama_gen_end(SEXP r_state) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_gen_state * st = llamar_gen_state_arg(r_state);
     st->done = true;
     // Whatever is left in the carry buffer is an incomplete UTF-8 character:
@@ -1417,13 +1461,15 @@ extern "C" SEXP r_llama_gen_end(SEXP r_state) {
     st->utf8_buf.clear();
     UNPROTECT(1);
     return r_text;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Sampler timings. These live on the sampler chain, which only outlives a
 // single call on the streaming path — hence a gen_state, not a context.
 extern "C" SEXP r_llama_perf_sampler(SEXP r_state) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_gen_state * st = llamar_gen_state_arg(r_state);
-    if (!st->smpl) Rf_error("llamaR: generation state has no sampler");
+    if (!st->smpl) llamar_error("llamaR: generation state has no sampler");
 
     struct llama_perf_sampler_data perf = llama_perf_sampler(st->smpl);
 
@@ -1438,20 +1484,25 @@ extern "C" SEXP r_llama_perf_sampler(SEXP r_state) {
 
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_perf_sampler_print(SEXP r_state) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_gen_state * st = llamar_gen_state_arg(r_state);
-    if (!st->smpl) Rf_error("llamaR: generation state has no sampler");
+    if (!st->smpl) llamar_error("llamaR: generation state has no sampler");
     llama_perf_sampler_print(st->smpl);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_perf_sampler_reset(SEXP r_state) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_gen_state * st = llamar_gen_state_arg(r_state);
-    if (!st->smpl) Rf_error("llamaR: generation state has no sampler");
+    if (!st->smpl) llamar_error("llamaR: generation state has no sampler");
     llama_perf_sampler_reset(st->smpl);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -1466,13 +1517,14 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
                                        SEXP r_max_new_tokens, SEXP r_params,
                                        SEXP r_grammar,
                                        SEXP r_trigger_patterns, SEXP r_trigger_tokens) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
     const llama_vocab * vocab = llama_model_get_vocab(model);
 
     int n_seq = Rf_length(r_prompts);
-    if (n_seq <= 0) Rf_error("llamaR: prompts must be non-empty character vector");
+    if (n_seq <= 0) llamar_error("llamaR: prompts must be non-empty character vector");
 
     int max_new_tokens = INTEGER(r_max_new_tokens)[0];
 
@@ -1481,8 +1533,8 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
     // sequences would stop being independent, and there is no public setter to
     // re-seed a copy. Refuse outright rather than silently ignoring the chain.
     if (llamar_is_chain_arg(r_params)) {
-        Rf_error("llamaR: llama_generate_batch does not accept a sampler chain; "
-                 "pass a parameter list from llama_sampler_params() instead");
+        llamar_error("llamaR: llama_generate_batch does not accept a sampler chain; "
+                     "pass a parameter list from llama_sampler_params() instead");
     }
 
     const llamar_sampler_params sp = llamar_sampler_params_from_sexp(r_params);
@@ -1493,8 +1545,8 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
         uint32_t n_ctx = llama_n_ctx(ctx);
         uint32_t n_seq_max = llama_n_seq_max(ctx);
         if ((uint32_t) n_seq > n_seq_max) {
-            Rf_error("llamaR: %d prompts exceeds context n_seq_max=%u "
-                     "(rebuild context with larger n_seq_max)", n_seq, n_seq_max);
+            llamar_error("llamaR: %d prompts exceeds context n_seq_max=%u "
+                         "(rebuild context with larger n_seq_max)", n_seq, n_seq_max);
         }
         // Capacity check itself happens after tokenization below.
         (void) n_ctx;
@@ -1511,10 +1563,10 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
     for (int s = 0; s < n_seq; s++) {
         const char * p = CHAR(STRING_ELT(r_prompts, s));
         if (tokenize_text(vocab, p, prompt_tokens[s]) < 0) {
-            Rf_error("llamaR: tokenization failed for prompt %d", s + 1);
+            llamar_error("llamaR: tokenization failed for prompt %d", s + 1);
         }
         if (prompt_tokens[s].empty()) {
-            Rf_error("llamaR: prompt %d produced zero tokens", s + 1);
+            llamar_error("llamaR: prompt %d produced zero tokens", s + 1);
         }
         total_prompt_tokens += (int) prompt_tokens[s].size();
     }
@@ -1524,8 +1576,8 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
         uint32_t n_ctx = llama_n_ctx(ctx);
         uint32_t need  = (uint32_t) total_prompt_tokens + (uint32_t) (n_seq * max_new_tokens);
         if (need > n_ctx) {
-            Rf_error("llamaR: required tokens (%u) exceed context n_ctx=%u "
-                     "(prompts=%d, max_new=%d)", need, n_ctx, total_prompt_tokens, max_new_tokens);
+            llamar_error("llamaR: required tokens (%u) exceed context n_ctx=%u "
+                         "(prompts=%d, max_new=%d)", need, n_ctx, total_prompt_tokens, max_new_tokens);
         }
     }
 
@@ -1577,7 +1629,7 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
     if (llama_decode(ctx, batch) != 0) {
         llama_batch_free(batch);
         cleanup_samplers();
-        Rf_error("llamaR: prefill decode failed");
+        llamar_error("llamaR: prefill decode failed");
     }
     t_prefill += llama_time_us() - t0_prefill;
     llama_batch_free(batch);
@@ -1634,7 +1686,7 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
         if (llama_decode(ctx, dbatch) != 0) {
             llama_batch_free(dbatch);
             cleanup_samplers();
-            Rf_error("llamaR: decode failed during batch generation");
+            llamar_error("llamaR: decode failed during batch generation");
         }
         t_decode += llama_time_us() - t0_dec;
         if (n_splits_first_decode < 0) {
@@ -1738,6 +1790,7 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
 
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -1745,6 +1798,7 @@ extern "C" SEXP r_llama_generate_batch(SEXP r_ctx, SEXP r_prompts,
 // ============================================================
 
 extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -1759,7 +1813,7 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
 
     std::vector<llama_token> tokens(n_tokens);
     int actual = llama_tokenize(vocab, text, text_len, tokens.data(), n_tokens, true, false);
-    if (actual < 0) Rf_error("llamaR: tokenization failed");
+    if (actual < 0) llamar_error("llamaR: tokenization failed");
     n_tokens = actual;
 
     // switch to embeddings mode, clear cache, run model
@@ -1771,7 +1825,7 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
     int ret = llama_decode(ctx, batch);
     if (ret != 0) {
         llama_set_embeddings(ctx, false);
-        Rf_error("llamaR: failed to compute embeddings (decode returned %d)", ret);
+        llamar_error("llamaR: failed to compute embeddings (decode returned %d)", ret);
     }
 
     llama_synchronize(ctx);
@@ -1779,7 +1833,7 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
     float * emb = llama_get_embeddings_ith(ctx, -1);
     if (!emb) {
         llama_set_embeddings(ctx, false);
-        Rf_error("llamaR: embeddings output is NULL — model may not support embeddings");
+        llamar_error("llamaR: embeddings output is NULL — model may not support embeddings");
     }
 
     int n_embd = llama_model_n_embd(model);
@@ -1796,9 +1850,11 @@ extern "C" SEXP r_llama_embeddings(SEXP r_ctx, SEXP r_text) {
     }
     UNPROTECT(1);
     return r_result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_embeddings_ith(SEXP r_ctx, SEXP r_i) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     int32_t i = INTEGER(r_i)[0];
@@ -1806,16 +1862,18 @@ extern "C" SEXP r_llama_get_embeddings_ith(SEXP r_ctx, SEXP r_i) {
     int n_embd = llama_model_n_embd(model);
 
     float * emb = llama_get_embeddings_ith(ctx, i);
-    if (!emb) Rf_error("llamaR: embeddings NULL for index %d", i);
+    if (!emb) llamar_error("llamaR: embeddings NULL for index %d", i);
 
     SEXP r_result = PROTECT(Rf_allocVector(REALSXP, n_embd));
     for (int j = 0; j < n_embd; j++)
         REAL(r_result)[j] = (double) emb[j];
     UNPROTECT(1);
     return r_result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_embeddings_seq(SEXP r_ctx, SEXP r_seq_id) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_seq_id seq_id = (llama_seq_id) INTEGER(r_seq_id)[0];
@@ -1823,25 +1881,27 @@ extern "C" SEXP r_llama_get_embeddings_seq(SEXP r_ctx, SEXP r_seq_id) {
     int n_embd = llama_model_n_embd(model);
 
     float * emb = llama_get_embeddings_seq(ctx, seq_id);
-    if (!emb) Rf_error("llamaR: pooled embeddings NULL for seq_id %d (model may not support pooling)", seq_id);
+    if (!emb) llamar_error("llamaR: pooled embeddings NULL for seq_id %d (model may not support pooling)", seq_id);
 
     SEXP r_result = PROTECT(Rf_allocVector(REALSXP, n_embd));
     for (int j = 0; j < n_embd; j++)
         REAL(r_result)[j] = (double) emb[j];
     UNPROTECT(1);
     return r_result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_embeddings(SEXP r_ctx, SEXP r_n_outputs) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
     int n_embd    = llama_model_n_embd(model);
     int n_outputs = INTEGER(r_n_outputs)[0];
-    if (n_outputs < 1) Rf_error("llamaR: n_outputs must be >= 1");
+    if (n_outputs < 1) llamar_error("llamaR: n_outputs must be >= 1");
 
     float * emb = llama_get_embeddings(ctx);
-    if (!emb) Rf_error("llamaR: embeddings NULL (no decode performed, or pooling_type != none)");
+    if (!emb) llamar_error("llamaR: embeddings NULL (no decode performed, or pooling_type != none)");
 
     // Return a matrix: n_outputs rows × n_embd cols (R is column-major)
     SEXP r_result = PROTECT(Rf_allocMatrix(REALSXP, n_outputs, n_embd));
@@ -1849,6 +1909,7 @@ extern "C" SEXP r_llama_get_embeddings(SEXP r_ctx, SEXP r_n_outputs) {
         REAL(r_result)[i] = (double) emb[i];
     UNPROTECT(1);
     return r_result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Helper: tokenize a single C-string, returns token count
@@ -1869,23 +1930,24 @@ static void embed_single(llama_context * ctx, const llama_vocab * vocab,
                           const char * text, float * out, int n_embd, int idx) {
     std::vector<llama_token> tokens;
     if (tokenize_text(vocab, text, tokens) < 0)
-        Rf_error("llamaR: tokenization failed for text %d", idx + 1);
+        llamar_error("llamaR: tokenization failed for text %d", idx + 1);
 
     llama_memory_clear(llama_get_memory(ctx), true);
     struct llama_batch batch = llama_batch_get_one(tokens.data(), (int) tokens.size());
     int ret = llama_decode(ctx, batch);
     if (ret != 0)
-        Rf_error("llamaR: embed decode failed for text %d (code %d)", idx + 1, ret);
+        llamar_error("llamaR: embed decode failed for text %d (code %d)", idx + 1, ret);
     llama_synchronize(ctx);
 
     float * emb = llama_get_embeddings_ith(ctx, -1);
     if (!emb)
-        Rf_error("llamaR: embeddings NULL for text %d", idx + 1);
+        llamar_error("llamaR: embeddings NULL for text %d", idx + 1);
     memcpy(out, emb, n_embd * sizeof(float));
 }
 
 // Batch embeddings: pooled path (embedding=TRUE) or sequential (embedding=FALSE)
 extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     bool embedding = ctx_is_embedding(r_ctx);
@@ -1907,7 +1969,7 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
     for (int s = 0; s < n_texts; s++) {
         const char * text = CHAR(STRING_ELT(r_texts, s));
         if (tokenize_text(vocab, text, all_tokens[s]) < 0)
-            Rf_error("llamaR: tokenization failed for text %d", s + 1);
+            llamar_error("llamaR: tokenization failed for text %d", s + 1);
         total_tokens += (int) all_tokens[s].size();
     }
 
@@ -1935,7 +1997,7 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
         llama_batch_free(batch);
         if (ret != 0) {
             UNPROTECT(1);
-            Rf_error("llamaR: batch embedding decode failed (code %d)", ret);
+            llamar_error("llamaR: batch embedding decode failed (code %d)", ret);
         }
         llama_synchronize(ctx);
 
@@ -1943,26 +2005,35 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
             float * emb = llama_get_embeddings_seq(ctx, (llama_seq_id) s);
             if (!emb) {
                 UNPROTECT(1);
-                Rf_error("llamaR: pooled embeddings NULL for seq %d", s);
+                llamar_error("llamaR: pooled embeddings NULL for seq %d", s);
             }
             for (int j = 0; j < n_embd; j++)
                 mat_ptr[s + j * n_texts] = (double) emb[j];
         }
     } else {
         // --- sequential: one decode per text, last-token embedding ---
+        // embed_single() reports failures by throwing, so the embeddings flag
+        // and the PROTECT of r_mat both have to be undone on that path too.
         llama_set_embeddings(ctx, true);
         std::vector<float> tmp(n_embd);
-        for (int s = 0; s < n_texts; s++) {
-            const char * text = CHAR(STRING_ELT(r_texts, s));
-            embed_single(ctx, vocab, text, tmp.data(), n_embd, s);
-            for (int j = 0; j < n_embd; j++)
-                mat_ptr[s + j * n_texts] = (double) tmp[j];
+        try {
+            for (int s = 0; s < n_texts; s++) {
+                const char * text = CHAR(STRING_ELT(r_texts, s));
+                embed_single(ctx, vocab, text, tmp.data(), n_embd, s);
+                for (int j = 0; j < n_embd; j++)
+                    mat_ptr[s + j * n_texts] = (double) tmp[j];
+            }
+        } catch (...) {
+            llama_set_embeddings(ctx, false);
+            UNPROTECT(1);
+            throw;
         }
         llama_set_embeddings(ctx, false);
     }
 
     UNPROTECT(1);
     return r_mat;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -1970,6 +2041,7 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
 // ============================================================
 
 extern "C" SEXP r_llama_chat_template(SEXP r_model, SEXP r_name) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const char * name = Rf_isNull(r_name) ? NULL : CHAR(STRING_ELT(r_name, 0));
@@ -1979,9 +2051,11 @@ extern "C" SEXP r_llama_chat_template(SEXP r_model, SEXP r_name) {
         return R_NilValue;
     }
     return Rf_mkString(tmpl);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_chat_apply_template(SEXP r_tmpl, SEXP r_messages, SEXP r_add_ass) {
+    LLAMAR_ENTRYPOINT_BEGIN
     const char * tmpl = Rf_isNull(r_tmpl) ? NULL : CHAR(STRING_ELT(r_tmpl, 0));
     bool add_ass = LOGICAL(r_add_ass)[0];
 
@@ -2020,17 +2094,18 @@ extern "C" SEXP r_llama_chat_apply_template(SEXP r_tmpl, SEXP r_messages, SEXP r
     // First call to get required size
     int size = llama_chat_apply_template(tmpl, messages.data(), n_msg, add_ass, NULL, 0);
     if (size < 0) {
-        Rf_error("llamaR: failed to apply chat template");
+        llamar_error("llamaR: failed to apply chat template");
     }
 
     std::vector<char> buf(size + 1);
     int actual = llama_chat_apply_template(tmpl, messages.data(), n_msg, add_ass, buf.data(), buf.size());
     if (actual < 0) {
-        Rf_error("llamaR: failed to apply chat template");
+        llamar_error("llamaR: failed to apply chat template");
     }
     buf[actual] = '\0';
 
     return Rf_mkString(buf.data());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2044,19 +2119,21 @@ static void lora_finalizer(SEXP x) {
 }
 
 extern "C" SEXP r_llama_lora_load(SEXP r_model, SEXP r_path) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
 
     llama_adapter_lora * adapter = llama_adapter_lora_init(model, path);
     if (!adapter) {
-        Rf_error("llamaR: failed to load LoRA adapter from '%s'", path);
+        llamar_error("llamaR: failed to load LoRA adapter from '%s'", path);
     }
 
     SEXP result = PROTECT(R_MakeExternalPtr(adapter, R_NilValue, R_NilValue));
     R_RegisterCFinalizer(result, lora_finalizer);
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // [llamaR] master replaced the per-adapter set/rm/clear API with a single
@@ -2084,6 +2161,7 @@ static void llamar_lora_sync(llama_context * ctx) {
 }
 
 extern "C" SEXP r_llama_lora_apply(SEXP r_ctx, SEXP r_adapter, SEXP r_scale) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_adapter_lora * adapter = llamar_lora_arg(r_adapter);
@@ -2094,9 +2172,11 @@ extern "C" SEXP r_llama_lora_apply(SEXP r_ctx, SEXP r_adapter, SEXP r_scale) {
     llamar_lora_sync(ctx);
 
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_lora_remove(SEXP r_ctx, SEXP r_adapter) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_adapter_lora * adapter = llamar_lora_arg(r_adapter);
@@ -2109,19 +2189,23 @@ extern "C" SEXP r_llama_lora_remove(SEXP r_ctx, SEXP r_adapter) {
     active.erase(it);
     llamar_lora_sync(ctx);
     return Rf_ScalarInteger(0);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_lora_clear(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     g_lora_active.erase(ctx);
     llama_set_adapters_lora(ctx, nullptr, 0, nullptr);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // All GGUF metadata of a LoRA adapter, as a named character vector. Mirrors
 // r_llama_model_meta() but reads from the adapter rather than the model.
 extern "C" SEXP r_llama_lora_meta(SEXP r_adapter) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_adapter_lora * adapter = llamar_lora_arg(r_adapter);
 
     int32_t count = llama_adapter_meta_count(adapter);
@@ -2142,9 +2226,11 @@ extern "C" SEXP r_llama_lora_meta(SEXP r_adapter) {
 
     UNPROTECT(2);
     return values;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_lora_meta_val(SEXP r_adapter, SEXP r_key) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_adapter_lora * adapter = llamar_lora_arg(r_adapter);
 
     const char * key = CHAR(STRING_ELT(r_key, 0));
@@ -2153,11 +2239,13 @@ extern "C" SEXP r_llama_lora_meta_val(SEXP r_adapter, SEXP r_key) {
     int32_t len = llama_adapter_meta_val_str(adapter, key, buf, sizeof(buf));
     if (len < 0) return R_NilValue;   // key absent
     return Rf_mkString(buf);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Invocation tokens of an activated LoRA (aLoRA). A plain LoRA has none, in
 // which case this returns NULL.
 extern "C" SEXP r_llama_lora_alora_invocation_tokens(SEXP r_adapter) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_adapter_lora * adapter = llamar_lora_arg(r_adapter);
 
     uint64_t n = llama_adapter_get_alora_n_invocation_tokens(adapter);
@@ -2172,12 +2260,14 @@ extern "C" SEXP r_llama_lora_alora_invocation_tokens(SEXP r_adapter) {
     }
     UNPROTECT(1);
     return out;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Control vector: a per-layer steering direction added to the residual stream.
 // Passing NULL data clears any vector currently applied to the context.
 extern "C" SEXP r_llama_apply_adapter_cvec(SEXP r_ctx, SEXP r_data, SEXP r_n_embd,
                                            SEXP r_il_start, SEXP r_il_end) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     int32_t n_embd    = INTEGER(r_n_embd)[0];
@@ -2189,7 +2279,7 @@ extern "C" SEXP r_llama_apply_adapter_cvec(SEXP r_ctx, SEXP r_data, SEXP r_n_emb
     // definition was never seen as extern "C" and linked under a mangled name.
     if (Rf_isNull(r_data)) {
         if (llama_set_adapter_cvec(ctx, nullptr, 0, n_embd, il_start, il_end) != 0) {
-            Rf_error("llamaR: failed to clear the control vector");
+            llamar_error("llamaR: failed to clear the control vector");
         }
         return R_NilValue;
     }
@@ -2202,10 +2292,11 @@ extern "C" SEXP r_llama_apply_adapter_cvec(SEXP r_ctx, SEXP r_data, SEXP r_n_emb
     }
 
     if (llama_set_adapter_cvec(ctx, data.data(), data.size(), n_embd, il_start, il_end) != 0) {
-        Rf_error("llamaR: failed to apply the control vector "
-                 "(check n_embd and the layer range against the model)");
+        llamar_error("llamaR: failed to apply the control vector "
+                     "(check n_embd and the layer range against the model)");
     }
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2213,59 +2304,80 @@ extern "C" SEXP r_llama_apply_adapter_cvec(SEXP r_ctx, SEXP r_data, SEXP r_n_emb
 // ============================================================
 
 extern "C" SEXP r_llama_model_size(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarReal((double) llama_model_size(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_n_params(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarReal((double) llama_model_n_params(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_has_encoder(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_model_has_encoder(model) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_has_decoder(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_model_has_decoder(model) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_is_recurrent(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_model_is_recurrent(model) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_is_hybrid(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_model_is_hybrid(model) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_is_diffusion(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_model_is_diffusion(model) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Input embedding width. Differs from llama_model_n_embd() on models whose
 // input projection is wider than the residual stream (e.g. some VL models).
 extern "C" SEXP r_llama_model_n_embd_inp(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarInteger((int) llama_model_n_embd_inp(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_n_embd_out(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarInteger((int) llama_model_n_embd_out(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Sliding-window attention span; 0 when the model attends over the full context.
 extern "C" SEXP r_llama_model_n_swa(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarInteger((int) llama_model_n_swa(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_rope_type(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     // Returned as a string: the enum values are non-contiguous (they alias the
     // GGML_ROPE_TYPE_* bit flags), so a bare integer would be hard to read.
@@ -2280,21 +2392,27 @@ extern "C" SEXP r_llama_model_rope_type(SEXP r_model) {
         default:                     name = "unknown"; break;
     }
     return Rf_mkString(name);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_rope_freq_scale_train(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarReal((double) llama_model_rope_freq_scale_train(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Number of classifier outputs (0 unless the model is a classifier/reranker).
 extern "C" SEXP r_llama_model_n_cls_out(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarInteger((int) llama_model_n_cls_out(model));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Labels for the classifier outputs, or NULL when the model provides none.
 extern "C" SEXP r_llama_model_cls_labels(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     uint32_t n = llama_model_n_cls_out(model);
@@ -2313,21 +2431,25 @@ extern "C" SEXP r_llama_model_cls_labels(SEXP r_model) {
     }
     UNPROTECT(1);
     return any ? out : R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_decoder_start_token(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     llama_token tok = llama_model_decoder_start_token(model);
     // -1 means the model does not define one; report that as NA rather than
     // handing back a token id that cannot be detokenized.
     if (tok < 0) return Rf_ScalarInteger(NA_INTEGER);
     return Rf_ScalarInteger((int) tok);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // GGUF keys holding the sampling parameters recommended by the model author,
 // e.g. "sampling.top_k". Returned as a named character vector so callers can
 // look them up with llama_model_meta_val().
 extern "C" SEXP r_llama_model_sampling_meta_keys(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     static const struct { enum llama_model_meta_key key; const char * name; } keys[] = {
         { LLAMA_MODEL_META_KEY_SAMPLING_SEQUENCE,        "sequence"        },
         { LLAMA_MODEL_META_KEY_SAMPLING_TOP_K,           "top_k"           },
@@ -2354,9 +2476,11 @@ extern "C" SEXP r_llama_model_sampling_meta_keys(void) {
     Rf_setAttrib(out, R_NamesSymbol, names);
     UNPROTECT(2);
     return out;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_meta(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     int32_t count = llama_model_meta_count(model);
@@ -2386,9 +2510,11 @@ extern "C" SEXP r_llama_model_meta(SEXP r_model) {
     Rf_setAttrib(values, R_NamesSymbol, names);
     UNPROTECT(2);
     return values;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_model_meta_val(SEXP r_model, SEXP r_key) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const char * key = CHAR(STRING_ELT(r_key, 0));
@@ -2397,6 +2523,7 @@ extern "C" SEXP r_llama_model_meta_val(SEXP r_model, SEXP r_key) {
     if (len < 0) return R_NilValue;
     buf[(len < (int32_t)sizeof(buf) - 1) ? len : (int32_t)sizeof(buf) - 1] = '\0';
     return Rf_mkString(buf);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2404,6 +2531,7 @@ extern "C" SEXP r_llama_model_meta_val(SEXP r_model, SEXP r_key) {
 // ============================================================
 
 extern "C" SEXP r_llama_vocab_info(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -2437,9 +2565,11 @@ extern "C" SEXP r_llama_vocab_info(SEXP r_model) {
 
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_type(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -2456,41 +2586,51 @@ extern "C" SEXP r_llama_vocab_type(SEXP r_model) {
         default: name = "unknown"; break;
     }
     return Rf_mkString(name);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_is_eog(SEXP r_model, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token token = INTEGER(r_token)[0];
     return Rf_ScalarLogical(llama_vocab_is_eog(vocab, token) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_is_control(SEXP r_model, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token token = INTEGER(r_token)[0];
     return Rf_ScalarLogical(llama_vocab_is_control(vocab, token) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_get_text(SEXP r_model, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token token = INTEGER(r_token)[0];
     const char * text = llama_vocab_get_text(vocab, token);
     if (!text) return R_NilValue;
     return Rf_mkString(text);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_get_score(SEXP r_model, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token token = INTEGER(r_token)[0];
     return Rf_ScalarReal((double) llama_vocab_get_score(vocab, token));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Token attributes are a bit mask; returned as a character vector of the set
 // flags, which is far more usable from R than the raw integer.
 extern "C" SEXP r_llama_vocab_get_attr(SEXP r_model, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     const llama_vocab * vocab = llama_model_get_vocab(model);
     llama_token token = INTEGER(r_token)[0];
@@ -2524,45 +2664,60 @@ extern "C" SEXP r_llama_vocab_get_attr(SEXP r_model, SEXP r_token) {
     }
     UNPROTECT(1);
     return out;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_get_add_bos(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_vocab_get_add_bos(llama_model_get_vocab(model)) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_get_add_eos(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_vocab_get_add_eos(llama_model_get_vocab(model)) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_get_add_sep(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     return Rf_ScalarLogical(llama_vocab_get_add_sep(llama_model_get_vocab(model)) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Special-token ids not covered by llama_vocab_info(). Absent tokens come back
 // as NA rather than -1.
 extern "C" SEXP r_llama_vocab_mask(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     llama_token tok = llama_vocab_mask(llama_model_get_vocab(model));
     return Rf_ScalarInteger(tok < 0 ? NA_INTEGER : (int) tok);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_vocab_fim_pad(SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = llamar_model_arg(r_model);
     llama_token tok = llama_vocab_fim_pad(llama_model_get_vocab(model));
     return Rf_ScalarInteger(tok < 0 ? NA_INTEGER : (int) tok);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // --- hardware / build limits (no model or context needed) ------------------
 
 extern "C" SEXP r_llama_max_parallel_sequences(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarInteger((int) llama_max_parallel_sequences());
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_max_tensor_buft_overrides(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarInteger((int) llama_max_tensor_buft_overrides());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2570,33 +2725,41 @@ extern "C" SEXP r_llama_max_tensor_buft_overrides(void) {
 // ============================================================
 
 extern "C" SEXP r_llama_set_n_threads(SEXP r_ctx, SEXP r_n_threads, SEXP r_n_threads_batch) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     int32_t n_threads       = INTEGER(r_n_threads)[0];
     int32_t n_threads_batch = INTEGER(r_n_threads_batch)[0];
     llama_set_n_threads(ctx, n_threads, n_threads_batch);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_set_causal_attn(SEXP r_ctx, SEXP r_causal) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     bool causal = LOGICAL(r_causal)[0] != 0;
     llama_set_causal_attn(ctx, causal);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_model(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     // The model R object is stored as the "prot" of the context external pointer.
     // Return it directly — same R externalptr that was passed to llama_new_context().
     (void) llamar_ctx_arg(r_ctx);   // validate the handle, discard the address
     return R_ExternalPtrProtected(r_ctx);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_set_warmup(SEXP r_ctx, SEXP r_warmup) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     llama_set_warmup(ctx, LOGICAL(r_warmup)[0] != 0);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Global abort callback state (one slot — sufficient for single-context use)
@@ -2616,12 +2779,13 @@ static bool r_abort_callback(void * data) {
 }
 
 extern "C" SEXP r_llama_set_abort_callback(SEXP r_ctx, SEXP r_fn) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     // Validate before mutating any state, so an error leaves the old callback
     // intact rather than half-replaced.
     if (r_fn != R_NilValue && !Rf_isFunction(r_fn)) {
-        Rf_error("llamaR: abort_callback must be a function or NULL");
+        llamar_error("llamaR: abort_callback must be a function or NULL");
     }
 
     // Release the previously preserved callback (if any) before replacing it,
@@ -2639,43 +2803,56 @@ extern "C" SEXP r_llama_set_abort_callback(SEXP r_ctx, SEXP r_fn) {
         llama_set_abort_callback(ctx, r_abort_callback, NULL);
     }
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_ctx(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger((int) llama_n_ctx(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_ctx_seq(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger((int) llama_n_ctx_seq(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_batch(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger((int) llama_n_batch(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_ubatch(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger((int) llama_n_ubatch(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_seq_max(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger((int) llama_n_seq_max(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // llama.cpp's own name for a flash-attention type ("auto" / "enabled" /
 // "disabled"), for the enum values llama_new_context() accepts.
 extern "C" SEXP r_llama_flash_attn_type_name(SEXP r_type) {
+    LLAMAR_ENTRYPOINT_BEGIN
     const int t = INTEGER(r_type)[0];
-    if (t == NA_INTEGER) Rf_error("llamaR: flash_attn type must not be NA");
+    if (t == NA_INTEGER) llamar_error("llamaR: flash_attn type must not be NA");
     if (t < LLAMA_FLASH_ATTN_TYPE_AUTO || t > LLAMA_FLASH_ATTN_TYPE_ENABLED) {
-        Rf_error("llamaR: unknown flash_attn type %d", t);
+        llamar_error("llamaR: unknown flash_attn type %d", t);
     }
     const char * name = llama_flash_attn_type_name((enum llama_flash_attn_type) t);
     return Rf_mkString(name ? name : "");
+    LLAMAR_ENTRYPOINT_END
 }
 
 // What a context actually resolved flash attention to. Asking for "auto" leaves
@@ -2687,6 +2864,7 @@ extern "C" SEXP r_llama_flash_attn_type_name(SEXP r_type) {
 // the flag right after (llama-context.cpp), so on a live context it is always
 // false and there is nothing to report from it.
 extern "C" SEXP r_llama_context_flash_attn(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_cparams & cp = ctx->get_cparams();
@@ -2705,19 +2883,25 @@ extern "C" SEXP r_llama_context_flash_attn(SEXP r_ctx) {
     Rf_setAttrib(out, R_NamesSymbol, names);
     UNPROTECT(2);
     return out;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_threads(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger(llama_n_threads(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_n_threads_batch(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarInteger(llama_n_threads_batch(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_pooling_type(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     int pt = (int) llama_pooling_type(ctx);
     const char * name;
@@ -2731,6 +2915,7 @@ extern "C" SEXP r_llama_pooling_type(SEXP r_ctx) {
         default: name = "unknown";     break;
     }
     return Rf_mkString(name);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2738,12 +2923,15 @@ extern "C" SEXP r_llama_pooling_type(SEXP r_ctx) {
 // ============================================================
 
 extern "C" SEXP r_llama_memory_clear(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     llama_memory_clear(llama_get_memory(ctx), true);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_rm(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEXP r_p1) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_seq_id seq_id = INTEGER(r_seq_id)[0];
@@ -2752,25 +2940,31 @@ extern "C" SEXP r_llama_memory_seq_rm(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEXP
 
     bool ok = llama_memory_seq_rm(llama_get_memory(ctx), seq_id, p0, p1);
     return Rf_ScalarLogical(ok ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_cp(SEXP r_ctx, SEXP r_seq_src, SEXP r_seq_dst, SEXP r_p0, SEXP r_p1) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_memory_seq_cp(llama_get_memory(ctx),
                         INTEGER(r_seq_src)[0], INTEGER(r_seq_dst)[0],
                         INTEGER(r_p0)[0], INTEGER(r_p1)[0]);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_keep(SEXP r_ctx, SEXP r_seq_id) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_memory_seq_keep(llama_get_memory(ctx), INTEGER(r_seq_id)[0]);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_add(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEXP r_p1, SEXP r_delta) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_memory_seq_add(llama_get_memory(ctx),
@@ -2778,9 +2972,11 @@ extern "C" SEXP r_llama_memory_seq_add(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEX
                          INTEGER(r_p0)[0], INTEGER(r_p1)[0],
                          INTEGER(r_delta)[0]);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_div(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEXP r_p1, SEXP r_d) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_memory_seq_div(llama_get_memory(ctx),
@@ -2788,9 +2984,11 @@ extern "C" SEXP r_llama_memory_seq_div(SEXP r_ctx, SEXP r_seq_id, SEXP r_p0, SEX
                          INTEGER(r_p0)[0], INTEGER(r_p1)[0],
                          INTEGER(r_d)[0]);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_seq_pos_range(SEXP r_ctx, SEXP r_seq_id) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_seq_id seq_id = INTEGER(r_seq_id)[0];
@@ -2807,11 +3005,14 @@ extern "C" SEXP r_llama_memory_seq_pos_range(SEXP r_ctx, SEXP r_seq_id) {
 
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_can_shift(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarLogical(llama_memory_can_shift(llama_get_memory(ctx)) ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -2819,22 +3020,26 @@ extern "C" SEXP r_llama_memory_can_shift(SEXP r_ctx) {
 // ============================================================
 
 extern "C" SEXP r_llama_state_save(SEXP r_ctx, SEXP r_path) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
     bool ok = llama_state_save_file(ctx, path, NULL, 0);
-    if (!ok) Rf_error("llamaR: failed to save state to '%s'", path);
+    if (!ok) llamar_error("llamaR: failed to save state to '%s'", path);
     return Rf_ScalarLogical(TRUE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_load(SEXP r_ctx, SEXP r_path) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
     size_t n_token_count = 0;
     bool ok = llama_state_load_file(ctx, path, NULL, 0, &n_token_count);
-    if (!ok) Rf_error("llamaR: failed to load state from '%s'", path);
+    if (!ok) llamar_error("llamaR: failed to load state from '%s'", path);
     return Rf_ScalarLogical(TRUE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // --- state as raw bytes, whole context ------------------------------------
@@ -2843,16 +3048,17 @@ extern "C" SEXP r_llama_state_load(SEXP r_ctx, SEXP r_path) {
 // overestimate, so the buffer is trimmed to the number of bytes actually
 // written before being returned.
 extern "C" SEXP r_llama_state_get_data(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     size_t size = llama_state_get_size(ctx);
-    if (size == 0) Rf_error("llamaR: context reports a zero-sized state");
+    if (size == 0) llamar_error("llamaR: context reports a zero-sized state");
 
     SEXP buf = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) size));
     size_t written = llama_state_get_data(ctx, RAW(buf), size);
     if (written == 0) {
         UNPROTECT(1);
-        Rf_error("llamaR: failed to copy context state");
+        llamar_error("llamaR: failed to copy context state");
     }
 
     if (written < size) {
@@ -2864,19 +3070,22 @@ extern "C" SEXP r_llama_state_get_data(SEXP r_ctx) {
 
     UNPROTECT(1);
     return buf;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_set_data(SEXP r_ctx, SEXP r_data) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
-    if (TYPEOF(r_data) != RAWSXP) Rf_error("llamaR: state data must be a raw vector");
+    if (TYPEOF(r_data) != RAWSXP) llamar_error("llamaR: state data must be a raw vector");
 
     size_t size = (size_t) Rf_xlength(r_data);
     size_t read = llama_state_set_data(ctx, RAW(r_data), size);
     if (read == 0) {
-        Rf_error("llamaR: failed to restore context state "
-                 "(the data may be truncated or from an incompatible model)");
+        llamar_error("llamaR: failed to restore context state "
+                     "(the data may be truncated or from an incompatible model)");
     }
     return Rf_ScalarReal((double) read);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // --- per-sequence state ----------------------------------------------------
@@ -2884,28 +3093,31 @@ extern "C" SEXP r_llama_state_set_data(SEXP r_ctx, SEXP r_data) {
 // The _ext entry points take a flags word; passing 0 makes them behave exactly
 // like the plain ones, so a single implementation covers both.
 extern "C" SEXP r_llama_state_seq_get_size(SEXP r_ctx, SEXP r_seq_id, SEXP r_flags) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_seq_id seq_id = (llama_seq_id) INTEGER(r_seq_id)[0];
     llama_state_seq_flags flags = (llama_state_seq_flags) INTEGER(r_flags)[0];
 
     return Rf_ScalarReal((double) llama_state_seq_get_size_ext(ctx, seq_id, flags));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_seq_get_data(SEXP r_ctx, SEXP r_seq_id, SEXP r_flags) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     llama_seq_id seq_id = (llama_seq_id) INTEGER(r_seq_id)[0];
     llama_state_seq_flags flags = (llama_state_seq_flags) INTEGER(r_flags)[0];
 
     size_t size = llama_state_seq_get_size_ext(ctx, seq_id, flags);
-    if (size == 0) Rf_error("llamaR: sequence %d reports a zero-sized state", (int) seq_id);
+    if (size == 0) llamar_error("llamaR: sequence %d reports a zero-sized state", (int) seq_id);
 
     SEXP buf = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) size));
     size_t written = llama_state_seq_get_data_ext(ctx, RAW(buf), size, seq_id, flags);
     if (written == 0) {
         UNPROTECT(1);
-        Rf_error("llamaR: failed to copy the state of sequence %d", (int) seq_id);
+        llamar_error("llamaR: failed to copy the state of sequence %d", (int) seq_id);
     }
 
     if (written < size) {
@@ -2917,11 +3129,13 @@ extern "C" SEXP r_llama_state_seq_get_data(SEXP r_ctx, SEXP r_seq_id, SEXP r_fla
 
     UNPROTECT(1);
     return buf;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_seq_set_data(SEXP r_ctx, SEXP r_data, SEXP r_seq_id, SEXP r_flags) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
-    if (TYPEOF(r_data) != RAWSXP) Rf_error("llamaR: state data must be a raw vector");
+    if (TYPEOF(r_data) != RAWSXP) llamar_error("llamaR: state data must be a raw vector");
 
     llama_seq_id seq_id = (llama_seq_id) INTEGER(r_seq_id)[0];
     llama_state_seq_flags flags = (llama_state_seq_flags) INTEGER(r_flags)[0];
@@ -2930,15 +3144,17 @@ extern "C" SEXP r_llama_state_seq_set_data(SEXP r_ctx, SEXP r_data, SEXP r_seq_i
                                                (size_t) Rf_xlength(r_data),
                                                seq_id, flags);
     if (read == 0) {
-        Rf_error("llamaR: failed to restore the state of sequence %d "
-                 "(the data may be truncated or from an incompatible model)", (int) seq_id);
+        llamar_error("llamaR: failed to restore the state of sequence %d "
+                     "(the data may be truncated or from an incompatible model)", (int) seq_id);
     }
     return Rf_ScalarReal((double) read);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Sequence state on disk. The token list travels with the state so a reloaded
 // sequence knows which prompt produced it.
 extern "C" SEXP r_llama_state_seq_save_file(SEXP r_ctx, SEXP r_path, SEXP r_seq_id, SEXP r_tokens) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
@@ -2957,13 +3173,15 @@ extern "C" SEXP r_llama_state_seq_save_file(SEXP r_ctx, SEXP r_path, SEXP r_seq_
                                                tokens.empty() ? NULL : tokens.data(),
                                                tokens.size());
     if (written == 0) {
-        Rf_error("llamaR: failed to save the state of sequence %d to '%s'", (int) seq_id, path);
+        llamar_error("llamaR: failed to save the state of sequence %d to '%s'", (int) seq_id, path);
     }
     return Rf_ScalarReal((double) written);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_seq_load_file(SEXP r_ctx, SEXP r_path, SEXP r_seq_id,
                                             SEXP r_n_token_capacity) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
@@ -2977,9 +3195,9 @@ extern "C" SEXP r_llama_state_seq_load_file(SEXP r_ctx, SEXP r_path, SEXP r_seq_
                                             capacity ? tokens.data() : NULL,
                                             capacity, &n_token_count);
     if (read == 0) {
-        Rf_error("llamaR: failed to load the state of sequence %d from '%s' "
-                 "(the file may be missing, truncated, or from an incompatible model)",
-                 (int) seq_id, path);
+        llamar_error("llamaR: failed to load the state of sequence %d from '%s' "
+                     "(the file may be missing, truncated, or from an incompatible model)",
+                     (int) seq_id, path);
     }
 
     SEXP r_toks = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t) n_token_count));
@@ -2998,17 +3216,22 @@ extern "C" SEXP r_llama_state_seq_load_file(SEXP r_ctx, SEXP r_path, SEXP r_seq_
 
     UNPROTECT(3);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_state_get_size(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     return Rf_ScalarReal((double) llama_state_get_size(ctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_synchronize(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     llama_synchronize(ctx);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3016,6 +3239,7 @@ extern "C" SEXP r_llama_synchronize(SEXP r_ctx) {
 // ============================================================
 
 extern "C" SEXP r_llama_get_logits(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -3023,7 +3247,7 @@ extern "C" SEXP r_llama_get_logits(SEXP r_ctx) {
     int n_vocab = llama_vocab_n_tokens(vocab);
 
     float * logits = llama_get_logits(ctx);
-    if (!logits) Rf_error("llamaR: logits are NULL (no decode has been performed)");
+    if (!logits) llamar_error("llamaR: logits are NULL (no decode has been performed)");
 
     SEXP result = PROTECT(Rf_allocVector(REALSXP, n_vocab));
     for (int i = 0; i < n_vocab; i++) {
@@ -3031,9 +3255,11 @@ extern "C" SEXP r_llama_get_logits(SEXP r_ctx) {
     }
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_get_logits_ith(SEXP r_ctx, SEXP r_i) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -3042,7 +3268,7 @@ extern "C" SEXP r_llama_get_logits_ith(SEXP r_ctx, SEXP r_i) {
 
     int32_t i = INTEGER(r_i)[0];
     float * logits = llama_get_logits_ith(ctx, i);
-    if (!logits) Rf_error("llamaR: logits_ith is NULL for i=%d", i);
+    if (!logits) llamar_error("llamaR: logits_ith is NULL for i=%d", i);
 
     SEXP result = PROTECT(Rf_allocVector(REALSXP, n_vocab));
     for (int k = 0; k < n_vocab; k++) {
@@ -3050,6 +3276,7 @@ extern "C" SEXP r_llama_get_logits_ith(SEXP r_ctx, SEXP r_i) {
     }
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3057,6 +3284,7 @@ extern "C" SEXP r_llama_get_logits_ith(SEXP r_ctx, SEXP r_i) {
 // ============================================================
 
 extern "C" SEXP r_llama_perf_context(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     struct llama_perf_context_data perf = llama_perf_context(ctx);
@@ -3080,21 +3308,27 @@ extern "C" SEXP r_llama_perf_context(SEXP r_ctx) {
 
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_perf_context_reset(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     llama_perf_context_reset(ctx);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_perf_context_print(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     llama_perf_context_print(ctx);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_memory_breakdown_print(SEXP r_ctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
     // [llamaR] upstream master removed llama_memory_breakdown_print(); it now
     // exposes llama_get_memory_breakdown() returning a per-buffer-type map, and
@@ -3119,11 +3353,14 @@ extern "C" SEXP r_llama_memory_breakdown_print(SEXP r_ctx) {
             tot_ctx     / (1024.0 * 1024.0),
             tot_compute / (1024.0 * 1024.0));
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_system_info(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     ensure_backend_init();
     return Rf_mkString(llama_print_system_info());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3131,19 +3368,27 @@ extern "C" SEXP r_llama_system_info(void) {
 // ============================================================
 
 extern "C" SEXP r_llama_supports_mmap(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarLogical(llama_supports_mmap() ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_supports_mlock(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarLogical(llama_supports_mlock() ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_supports_rpc(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarLogical(llama_supports_rpc() ? TRUE : FALSE);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_max_devices(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_ScalarInteger((int) llama_max_devices());
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3151,6 +3396,7 @@ extern "C" SEXP r_llama_max_devices(void) {
 // ============================================================
 
 extern "C" SEXP r_llama_chat_builtin_templates(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     // First call to get count
     int32_t count = llama_chat_builtin_templates(NULL, 0);
     if (count <= 0) {
@@ -3166,6 +3412,7 @@ extern "C" SEXP r_llama_chat_builtin_templates(void) {
     }
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3173,6 +3420,7 @@ extern "C" SEXP r_llama_chat_builtin_templates(void) {
 // ============================================================
 
 extern "C" SEXP r_llama_batch_init(SEXP r_n_tokens, SEXP r_embd, SEXP r_n_seq_max) {
+    LLAMAR_ENTRYPOINT_BEGIN
     int32_t n_tokens  = INTEGER(r_n_tokens)[0];
     int32_t embd      = INTEGER(r_embd)[0];
     int32_t n_seq_max = INTEGER(r_n_seq_max)[0];
@@ -3192,9 +3440,11 @@ extern "C" SEXP r_llama_batch_init(SEXP r_n_tokens, SEXP r_embd, SEXP r_n_seq_ma
     });
     UNPROTECT(2);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_batch_free(SEXP r_batch) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_batch * b = (llama_batch *) llamar_ptr_addr_or_null(r_batch, "batch");
     if (b) {
         llama_batch_free(*b);
@@ -3202,6 +3452,7 @@ extern "C" SEXP r_llama_batch_free(SEXP r_batch) {
         R_SetExternalPtrAddr(r_batch, NULL);
     }
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3209,6 +3460,7 @@ extern "C" SEXP r_llama_batch_free(SEXP r_batch) {
 // ============================================================
 
 extern "C" SEXP r_llama_encode(SEXP r_ctx, SEXP r_tokens) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     int n_tokens = LENGTH(r_tokens);
@@ -3219,9 +3471,10 @@ extern "C" SEXP r_llama_encode(SEXP r_ctx, SEXP r_tokens) {
 
     struct llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
     int32_t ret = llama_encode(ctx, batch);
-    if (ret < 0) Rf_error("llamaR: llama_encode failed (code %d)", ret);
+    if (ret < 0) llamar_error("llamaR: llama_encode failed (code %d)", ret);
 
     return Rf_ScalarInteger(ret);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3229,6 +3482,7 @@ extern "C" SEXP r_llama_encode(SEXP r_ctx, SEXP r_tokens) {
 // ============================================================
 
 extern "C" SEXP r_llama_token_to_piece(SEXP r_ctx, SEXP r_token, SEXP r_special) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_vocab * vocab = llama_model_get_vocab(llama_get_model(ctx));
@@ -3237,10 +3491,11 @@ extern "C" SEXP r_llama_token_to_piece(SEXP r_ctx, SEXP r_token, SEXP r_special)
 
     char buf[256];
     int32_t n = llama_token_to_piece(vocab, token, buf, sizeof(buf) - 1, 0, special);
-    if (n < 0) Rf_error("llamaR: llama_token_to_piece failed (buffer too small)");
+    if (n < 0) llamar_error("llamaR: llama_token_to_piece failed (buffer too small)");
     buf[n] = '\0';
 
     return Rf_mkString(buf);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -3319,18 +3574,18 @@ static SEXP llamar_new_sampler_handle(llama_sampler * smpl, bool owned, bool is_
 // Resolve an R handle to a live sampler, refusing anything freed or stale.
 static llamar_sampler_handle * llamar_sampler_handle_get(SEXP r_smpl) {
     if (TYPEOF(r_smpl) != EXTPTRSXP) {
-        Rf_error("llamaR: expected a sampler handle");
+        llamar_error("llamaR: expected a sampler handle");
     }
     llamar_sampler_handle * h = (llamar_sampler_handle *) R_ExternalPtrAddr(r_smpl);
     if (!h || !h->smpl) {
-        Rf_error("llamaR: sampler has already been freed");
+        llamar_error("llamaR: sampler has already been freed");
     }
     // A sampler owned by a chain dies with that chain; the generation snapshot
     // catches exactly that case.
     if (h->parent_life) {
         if (!h->parent_life->alive ||
             h->parent_life->generation != h->parent_generation) {
-            Rf_error("llamaR: sampler belonged to a chain that has been freed");
+            llamar_error("llamaR: sampler belonged to a chain that has been freed");
         }
     }
     return h;
@@ -3338,7 +3593,7 @@ static llamar_sampler_handle * llamar_sampler_handle_get(SEXP r_smpl) {
 
 static llamar_sampler_handle * llamar_chain_handle_get(SEXP r_chain) {
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_chain);
-    if (!h->is_chain) Rf_error("llamaR: expected a sampler chain");
+    if (!h->is_chain) llamar_error("llamaR: expected a sampler chain");
     return h;
 }
 
@@ -3348,20 +3603,23 @@ static llama_sampler * llamar_handle_chain_ptr(llamar_sampler_handle * h) {
 }
 
 extern "C" SEXP r_llama_sampler_chain_new(SEXP r_no_perf) {
+    LLAMAR_ENTRYPOINT_BEGIN
     auto params = llama_sampler_chain_default_params();
     if (!Rf_isNull(r_no_perf)) {
         int b = Rf_asLogical(r_no_perf);
         if (b != NA_LOGICAL) params.no_perf = (b == TRUE);
     }
     llama_sampler * chain = llama_sampler_chain_init(params);
-    if (!chain) Rf_error("llamaR: failed to create sampler chain");
+    if (!chain) llamar_error("llamaR: failed to create sampler chain");
     return llamar_new_sampler_handle(chain, true, true);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Build one standalone sampler by name. This is the practical replacement for
 // binding llama_sampler_init(), which exists to implement new samplers in C and
 // would need an R callback in the decode loop to be useful from R.
 extern "C" SEXP r_llama_sampler_new(SEXP r_kind, SEXP r_args, SEXP r_model) {
+    LLAMAR_ENTRYPOINT_BEGIN
     const char * kind = CHAR(STRING_ELT(r_kind, 0));
 
     const llama_model * model = NULL;
@@ -3398,23 +3656,23 @@ extern "C" SEXP r_llama_sampler_new(SEXP r_kind, SEXP r_args, SEXP r_model) {
     else if (strcmp(kind, "mirostat_v2") == 0) s = llama_sampler_init_mirostat_v2(
                                                        p.seed, p.mirostat_tau, p.mirostat_eta);
     else if (strcmp(kind, "mirostat")    == 0) {
-        if (!vocab) Rf_error("llamaR: sampler '%s' requires a model", kind);
+        if (!vocab) llamar_error("llamaR: sampler '%s' requires a model", kind);
         s = llama_sampler_init_mirostat(llama_vocab_n_tokens(vocab), p.seed,
                                         p.mirostat_tau, p.mirostat_eta, 100);
     }
     else if (strcmp(kind, "infill")      == 0) {
-        if (!vocab) Rf_error("llamaR: sampler '%s' requires a model", kind);
+        if (!vocab) llamar_error("llamaR: sampler '%s' requires a model", kind);
         s = llama_sampler_init_infill(vocab);
     }
     else if (strcmp(kind, "logit_bias")  == 0) {
-        if (!vocab) Rf_error("llamaR: sampler '%s' requires a model", kind);
-        if (p.logit_bias.empty()) Rf_error("llamaR: sampler 'logit_bias' needs a logit_bias argument");
+        if (!vocab) llamar_error("llamaR: sampler '%s' requires a model", kind);
+        if (p.logit_bias.empty()) llamar_error("llamaR: sampler 'logit_bias' needs a logit_bias argument");
         s = llama_sampler_init_logit_bias(llama_vocab_n_tokens(vocab),
                                           (int32_t) p.logit_bias.size(),
                                           p.logit_bias.data());
     }
     else if (strcmp(kind, "dry")         == 0) {
-        if (!model) Rf_error("llamaR: sampler '%s' requires a model", kind);
+        if (!model) llamar_error("llamaR: sampler '%s' requires a model", kind);
         std::vector<const char *> breakers;
         breakers.reserve(p.dry_sequence_breakers.size());
         for (const auto & b : p.dry_sequence_breakers) breakers.push_back(b.c_str());
@@ -3424,11 +3682,12 @@ extern "C" SEXP r_llama_sampler_new(SEXP r_kind, SEXP r_args, SEXP r_model) {
                                    breakers.data(), breakers.size());
     }
     else {
-        Rf_error("llamaR: unknown sampler kind '%s'", kind);
+        llamar_error("llamaR: unknown sampler kind '%s'", kind);
     }
 
-    if (!s) Rf_error("llamaR: failed to create sampler '%s'", kind);
+    if (!s) llamar_error("llamaR: failed to create sampler '%s'", kind);
     return llamar_new_sampler_handle(s, true, false);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Build a full chain from a llama_sampler_params() list, so the declarative
@@ -3437,6 +3696,7 @@ extern "C" SEXP r_llama_sampler_chain_from_params(SEXP r_ctx, SEXP r_params,
                                                   SEXP r_grammar,
                                                   SEXP r_trigger_patterns,
                                                   SEXP r_trigger_tokens) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_context * ctx = llamar_ctx_arg(r_ctx);
 
     const llama_model * model = llama_get_model(ctx);
@@ -3447,23 +3707,25 @@ extern "C" SEXP r_llama_sampler_chain_from_params(SEXP r_ctx, SEXP r_params,
 
     auto sparams = llama_sampler_chain_default_params();
     llama_sampler * chain = llama_sampler_chain_init(sparams);
-    if (!chain) Rf_error("llamaR: failed to create sampler chain");
+    if (!chain) llamar_error("llamaR: failed to create sampler chain");
 
     llamar_build_sampler_chain(chain, model, vocab, p, p.seed, grammar,
                                r_trigger_patterns, r_trigger_tokens);
 
     return llamar_new_sampler_handle(chain, true, true);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_chain_add(SEXP r_chain, SEXP r_smpl) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * ch = llamar_chain_handle_get(r_chain);
     llamar_sampler_handle * h  = llamar_sampler_handle_get(r_smpl);
 
     if (!h->owned) {
-        Rf_error("llamaR: sampler is already owned by a chain");
+        llamar_error("llamaR: sampler is already owned by a chain");
     }
     if (h == ch) {
-        Rf_error("llamaR: cannot add a chain to itself");
+        llamar_error("llamaR: cannot add a chain to itself");
     }
 
     llama_sampler_chain_add(ch->smpl, h->smpl);
@@ -3475,21 +3737,25 @@ extern "C" SEXP r_llama_sampler_chain_add(SEXP r_chain, SEXP r_smpl) {
     h->parent_generation = ch->life->generation;
 
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_chain_n(SEXP r_chain) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * ch = llamar_chain_handle_get(r_chain);
     return Rf_ScalarInteger(llama_sampler_chain_n(ch->smpl));
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Borrowed view of a chain member: the returned handle never owns the sampler
 // and is invalidated together with its chain.
 extern "C" SEXP r_llama_sampler_chain_get(SEXP r_chain, SEXP r_i) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * ch = llamar_chain_handle_get(r_chain);
     const int i = INTEGER(r_i)[0];
 
     llama_sampler * s = llama_sampler_chain_get(ch->smpl, i);
-    if (!s) Rf_error("llamaR: no sampler at index %d", i);
+    if (!s) llamar_error("llamaR: no sampler at index %d", i);
 
     SEXP ptr = PROTECT(llamar_new_sampler_handle(s, false, false));
     llamar_sampler_handle * h = (llamar_sampler_handle *) R_ExternalPtrAddr(ptr);
@@ -3497,15 +3763,17 @@ extern "C" SEXP r_llama_sampler_chain_get(SEXP r_chain, SEXP r_i) {
     h->parent_generation = ch->life->generation;
     UNPROTECT(1);
     return ptr;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Detach a sampler from its chain, handing ownership back to R.
 extern "C" SEXP r_llama_sampler_chain_remove(SEXP r_chain, SEXP r_i) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * ch = llamar_chain_handle_get(r_chain);
     const int i = INTEGER(r_i)[0];
 
     llama_sampler * s = llama_sampler_chain_remove(ch->smpl, i);
-    if (!s) Rf_error("llamaR: no sampler at index %d", i);
+    if (!s) llamar_error("llamaR: no sampler at index %d", i);
 
     // Any handle the caller still holds for this sampler (from chain_add or
     // chain_get) points at the same object the new handle now owns, so bump the
@@ -3518,35 +3786,45 @@ extern "C" SEXP r_llama_sampler_chain_remove(SEXP r_chain, SEXP r_i) {
     // parent_life at all: the link is severed outright rather than left holding
     // a generation number that a later wrap-around could falsely match.
     return llamar_new_sampler_handle(s, true, false);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_name(SEXP r_smpl) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_smpl);
     const char * name = llama_sampler_name(h->smpl);
     return Rf_mkString(name ? name : "");
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_reset(SEXP r_smpl) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_smpl);
     llama_sampler_reset(h->smpl);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_clone(SEXP r_smpl) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_smpl);
     llama_sampler * copy = llama_sampler_clone(h->smpl);
-    if (!copy) Rf_error("llamaR: this sampler cannot be cloned");
+    if (!copy) llamar_error("llamaR: this sampler cannot be cloned");
     // A clone is always freshly owned, even when cloned from a chain member.
     return llamar_new_sampler_handle(copy, true, h->is_chain);
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_accept(SEXP r_smpl, SEXP r_token) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_smpl);
     llama_sampler_accept(h->smpl, (llama_token) INTEGER(r_token)[0]);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_llama_sampler_get_seed(SEXP r_smpl) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llamar_sampler_handle * h = llamar_sampler_handle_get(r_smpl);
     const uint32_t seed = llama_sampler_get_seed(h->smpl);
     // LLAMA_DEFAULT_SEED means "no seed of its own"; it does not fit in an R
@@ -3555,17 +3833,19 @@ extern "C" SEXP r_llama_sampler_get_seed(SEXP r_smpl) {
         return Rf_ScalarInteger(NA_INTEGER);
     }
     return Rf_ScalarInteger((int) seed);
+    LLAMAR_ENTRYPOINT_END
 }
 
 // Free eagerly instead of waiting for the GC. Freeing a chain invalidates every
 // handle to a sampler inside it, which the generation check then reports.
 extern "C" SEXP r_llama_sampler_free(SEXP r_smpl) {
-    if (TYPEOF(r_smpl) != EXTPTRSXP) Rf_error("llamaR: expected a sampler handle");
+    LLAMAR_ENTRYPOINT_BEGIN
+    if (TYPEOF(r_smpl) != EXTPTRSXP) llamar_error("llamaR: expected a sampler handle");
     llamar_sampler_handle * h = (llamar_sampler_handle *) R_ExternalPtrAddr(r_smpl);
     if (!h || !h->smpl) return R_NilValue;   // already freed: nothing to do
 
     if (!h->owned) {
-        Rf_error("llamaR: this sampler is owned by a chain; free the chain instead");
+        llamar_error("llamaR: this sampler is owned by a chain; free the chain instead");
     }
     if (h->is_chain && h->life) {
         h->life->alive = false;
@@ -3574,6 +3854,7 @@ extern "C" SEXP r_llama_sampler_free(SEXP r_smpl) {
     llama_sampler_free(h->smpl);
     h->smpl = NULL;
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================

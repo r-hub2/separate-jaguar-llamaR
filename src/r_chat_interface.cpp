@@ -29,7 +29,8 @@
 #include <R.h>
 #include <Rinternals.h>
 
-#include "r_llama_ptr.h"  // type-checked externalptr arguments
+#include "r_llama_ptr.h"    // type-checked externalptr arguments
+#include "r_llama_throw.h"  // llamar_error(): throws instead of longjmp-ing
 
 using json = nlohmann::ordered_json;
 
@@ -62,17 +63,20 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
                                    SEXP r_tools_json, SEXP r_tool_choice,
                                    SEXP r_json_schema, SEXP r_add_gen,
                                    SEXP r_enable_thinking) {
-    const llama_model * model =
-        (const llama_model *) llamar_ptr_arg(r_model, "model");
-
-    const std::string messages_json = sexp_to_string(r_messages_json);
-    const std::string tools_json    = sexp_to_string(r_tools_json);
-    const std::string tool_choice   = sexp_to_string(r_tool_choice);
-    const std::string json_schema   = sexp_to_string(r_json_schema);
-    const bool add_gen        = Rf_asLogical(r_add_gen) == TRUE;
-    const bool enable_thinking = Rf_asLogical(r_enable_thinking) == TRUE;
-
+    // NB: argument reading sits inside the try as well — llamar_ptr_arg()
+    // reports a bad handle by throwing, and an exception escaping into R's C
+    // code calls std::terminate() rather than raising an R error.
     try {
+        const llama_model * model =
+            (const llama_model *) llamar_ptr_arg(r_model, "model");
+
+        const std::string messages_json = sexp_to_string(r_messages_json);
+        const std::string tools_json    = sexp_to_string(r_tools_json);
+        const std::string tool_choice   = sexp_to_string(r_tool_choice);
+        const std::string json_schema   = sexp_to_string(r_json_schema);
+        const bool add_gen        = Rf_asLogical(r_add_gen) == TRUE;
+        const bool enable_thinking = Rf_asLogical(r_enable_thinking) == TRUE;
+
         common_chat_templates_ptr tmpls =
             common_chat_templates_init(model, /* chat_template_override = */ "");
 
@@ -181,6 +185,8 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
 
         UNPROTECT(5);  // result, stops, preserved, tpat, ttok
         return result;
+    } catch (const llamar_exception & e) {
+        Rf_error("%s", e.what());
     } catch (const std::exception & e) {
         Rf_error("llamaR: chat_build failed: %s", e.what());
     }
@@ -193,16 +199,19 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
 
 extern "C" SEXP r_llama_chat_parse(SEXP r_input, SEXP r_format, SEXP r_is_partial,
                                    SEXP r_parser) {
-    const std::string input  = sexp_to_string(r_input);
-    const std::string parser = sexp_to_string(r_parser);
-    const int format_id      = Rf_asInteger(r_format);
-    const bool is_partial    = Rf_asLogical(r_is_partial) == TRUE;
-
-    if (format_id < 0 || format_id >= COMMON_CHAT_FORMAT_COUNT) {
-        Rf_error("llamaR: chat_parse received an invalid format id: %d", format_id);
-    }
-
+    // Argument reading stays inside the try for the same reason as in
+    // chat_build: anything that throws must not escape into R's C code.
     try {
+        const std::string input  = sexp_to_string(r_input);
+        const std::string parser = sexp_to_string(r_parser);
+        const int format_id      = Rf_asInteger(r_format);
+        const bool is_partial    = Rf_asLogical(r_is_partial) == TRUE;
+
+        if (format_id < 0 || format_id >= COMMON_CHAT_FORMAT_COUNT) {
+            llamar_error("llamaR: chat_parse received an invalid format id: %d",
+                         format_id);
+        }
+
         common_chat_parser_params syntax;
         syntax.format = (common_chat_format) format_id;
         syntax.parse_tool_calls = true;
@@ -238,6 +247,8 @@ extern "C" SEXP r_llama_chat_parse(SEXP r_input, SEXP r_format, SEXP r_is_partia
 
         UNPROTECT(4);  // tnames, targs, tids, result
         return result;
+    } catch (const llamar_exception & e) {
+        Rf_error("%s", e.what());
     } catch (const std::exception & e) {
         Rf_error("llamaR: chat_parse failed: %s", e.what());
     }

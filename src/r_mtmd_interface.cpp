@@ -22,6 +22,7 @@
 // The marker string (r_mtmd_marker) is what must appear in the prompt where the
 // image should be injected (e.g. "<__media__>").
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -38,7 +39,8 @@
 #undef length
 #endif
 
-#include "r_llama_ptr.h"  // type-checked externalptr arguments
+#include "r_llama_ptr.h"    // type-checked externalptr arguments
+#include "r_llama_throw.h"  // llamar_error(): throws instead of longjmp-ing
 
 static inline mtmd_context * llamar_mtmd_ctx_arg(SEXP x) {
     return (mtmd_context *) llamar_ptr_arg(x, "mtmd context");
@@ -86,6 +88,7 @@ static void mtmd_bitmap_finalizer(SEXP x) {
 
 extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
                             SEXP r_n_threads, SEXP r_use_gpu) {
+    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = (llama_model *) llamar_ptr_arg(r_model, "model");
 
     const char * mmproj = CHAR(STRING_ELT(r_mmproj_path, 0));
@@ -102,7 +105,7 @@ extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
 
     mtmd_context * mctx = mtmd_init_from_file(mmproj, model, params);
     if (!mctx) {
-        Rf_error("llamaR: failed to load multimodal projector from '%s'", mmproj);
+        llamar_error("llamaR: failed to load multimodal projector from '%s'", mmproj);
     }
 
     // prot = r_model keeps the text model alive while mctx references it
@@ -110,25 +113,34 @@ extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
     R_RegisterCFinalizer(result, mtmd_ctx_finalizer);
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_support_vision(SEXP r_mctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_vision(mctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_support_audio(SEXP r_mctx) {
+    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_audio(mctx));
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_marker(void) {
+    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_mkString(mtmd_default_marker());
+    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_set_verbosity(SEXP r_level) {
+    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_log_verbosity = Rf_asInteger(r_level);
     return R_NilValue;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -136,18 +148,20 @@ extern "C" SEXP r_mtmd_set_verbosity(SEXP r_level) {
 // ============================================================
 
 extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
+    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
     mtmd_bitmap * bmp = mtmd_helper_bitmap_init_from_file(mctx, path);
     if (!bmp) {
-        Rf_error("llamaR: failed to load media file '%s'", path);
+        llamar_error("llamaR: failed to load media file '%s'", path);
     }
 
     SEXP result = PROTECT(R_MakeExternalPtr(bmp, R_NilValue, R_NilValue));
     R_RegisterCFinalizer(result, mtmd_bitmap_finalizer);
     UNPROTECT(1);
     return result;
+    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -156,6 +170,7 @@ extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
 
 extern "C" SEXP r_mtmd_eval(SEXP r_mctx, SEXP r_lctx, SEXP r_prompt,
                             SEXP r_bitmap, SEXP r_n_past) {
+    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context  * mctx = llamar_mtmd_ctx_arg(r_mctx);
     llama_context * lctx = (llama_context *) llamar_ptr_arg(r_lctx, "llama context");
     mtmd_bitmap   * bmp  = llamar_bitmap_arg(r_bitmap);
@@ -170,33 +185,38 @@ extern "C" SEXP r_mtmd_eval(SEXP r_mctx, SEXP r_lctx, SEXP r_prompt,
 
     const mtmd_bitmap * bitmaps[1] = { bmp };
 
-    mtmd_input_chunks * chunks = mtmd_input_chunks_init();
-    if (!chunks) Rf_error("llamaR: failed to allocate mtmd input chunks");
+    // RAII: llamar_error() below unwinds by throwing, so the chunks must be
+    // owned by something with a destructor rather than freed by hand.
+    struct chunks_deleter {
+        void operator()(mtmd_input_chunks * c) const { mtmd_input_chunks_free(c); }
+    };
+    std::unique_ptr<mtmd_input_chunks, chunks_deleter> chunks(mtmd_input_chunks_init());
+    if (!chunks) llamar_error("llamaR: failed to allocate mtmd input chunks");
 
-    int32_t tok = mtmd_tokenize(mctx, chunks, &text, bitmaps, 1);
+    int32_t tok = mtmd_tokenize(mctx, chunks.get(), &text, bitmaps, 1);
     if (tok != 0) {
-        mtmd_input_chunks_free(chunks);
         if (tok == 1) {
-            Rf_error("llamaR: number of media markers in prompt does not match "
-                     "number of images (expected exactly one '%s')",
-                     mtmd_default_marker());
+            llamar_error("llamaR: number of media markers in prompt does not match "
+                         "number of images (expected exactly one '%s')",
+                         mtmd_default_marker());
         }
-        Rf_error("llamaR: mtmd_tokenize failed (image preprocessing error, code %d)", (int) tok);
+        llamar_error("llamaR: mtmd_tokenize failed (image preprocessing error, code %d)", (int) tok);
     }
 
     const int32_t n_batch = (int32_t) llama_n_batch(lctx);
     llama_pos new_n_past = n_past_in;
 
-    int32_t ev = mtmd_helper_eval_chunks(mctx, lctx, chunks,
+    int32_t ev = mtmd_helper_eval_chunks(mctx, lctx, chunks.get(),
                                          /*n_past*/ n_past_in,
                                          /*seq_id*/ 0,
                                          n_batch,
                                          /*logits_last*/ true,
                                          &new_n_past);
-    mtmd_input_chunks_free(chunks);
+    chunks.reset();
     if (ev != 0) {
-        Rf_error("llamaR: mtmd_helper_eval_chunks failed (code %d)", (int) ev);
+        llamar_error("llamaR: mtmd_helper_eval_chunks failed (code %d)", (int) ev);
     }
 
     return Rf_ScalarInteger((int) new_n_past);
+    LLAMAR_ENTRYPOINT_END
 }
