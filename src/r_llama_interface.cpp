@@ -2002,7 +2002,10 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
     } else {
         // --- sequential: one decode per text, last-token embedding ---
         // embed_single() reports failures by throwing, so the embeddings flag
-        // and the PROTECT of r_mat both have to be undone on that path too.
+        // has to be restored on that path too. The PROTECT of r_mat is left
+        // alone: the throw reaches the boundary, whose Rf_error() longjmps,
+        // and R restores the protection stack itself. Unprotecting by hand
+        // here would add an exit at a different depth for rchk to trip over.
         llama_set_embeddings(ctx, true);
         std::vector<float> tmp(n_embd);
         try {
@@ -2014,7 +2017,6 @@ extern "C" SEXP r_llama_embed_batch(SEXP r_ctx, SEXP r_texts) {
             }
         } catch (...) {
             llama_set_embeddings(ctx, false);
-            UNPROTECT(1);
             throw;
         }
         llama_set_embeddings(ctx, false);

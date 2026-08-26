@@ -64,12 +64,13 @@ inline void llamar_copy_what_(char * buf, size_t n, const std::exception & e) {
 // Hand a finished message to R. Marked noreturn so both the compiler and rchk
 // know control stops here: Rf_error() longjmps, which is also what resets the
 // protection stack after a throw that jumped over an UNPROTECT.
-#ifdef __GNUC__
-__attribute__((noreturn))
-#endif
-inline void llamar_raise_(const char * msg) {
+[[noreturn]] inline void llamar_raise_(const char * msg) {
     Rf_error("%s", msg);
+#ifdef __GNUC__
+    __builtin_unreachable();
+#else
     while (1) {}  // Rf_error never returns; silences -Wreturn-type
+#endif
 }
 
 // Boundary guard. Every extern "C" SEXP entrypoint wraps its body:
@@ -93,28 +94,29 @@ inline void llamar_raise_(const char * msg) {
 //     the message into a local buffer; the block ends, the exception is
 //     released, and only then does Rf_error() longjmp out.
 //
-//  2. The failure path must end in a call that does not return. R resets the
-//     protection stack itself when Rf_error() longjmps, so a throw between a
-//     PROTECT and its UNPROTECT needs no manual unwinding here -- but only if
-//     control cannot fall through to an ordinary `return` afterwards. Routing
-//     the failure through a noreturn helper says exactly that, and keeps rchk
-//     from reading the boundary as a protection stack imbalance.
+//  2. The failure path must not leave a normal-flow `return` behind it. R
+//     resets the protection stack itself when Rf_error() longjmps, so a throw
+//     between a PROTECT and its UNPROTECT needs no manual unwinding -- but
+//     rchk does not model exceptions. It reads the catch tail as an ordinary
+//     branch reachable from anywhere in the body, including from a point where
+//     PROTECT has run but UNPROTECT has not. A conditional raise followed by
+//     `return R_NilValue` therefore looks to rchk like an exit at depth 1:
+//     "possible protection stack imbalance". Falling unconditionally into a
+//     noreturn call removes that second exit entirely, so the only normal
+//     return rchk can see is the one inside the try, at the right depth.
 #define LLAMAR_ENTRYPOINT_BEGIN                                                \
     char llamar_err_buf_[1024];                                                \
-    bool llamar_failed_ = false;                                               \
     try {
 
 #define LLAMAR_ENTRYPOINT_END                                                  \
     } catch (const std::exception & e) {                                       \
         llamar_copy_what_(llamar_err_buf_, sizeof(llamar_err_buf_), e);        \
-        llamar_failed_ = true;                                                 \
     } catch (...) {                                                            \
         snprintf(llamar_err_buf_, sizeof(llamar_err_buf_),                     \
                  "llamaR: unknown C++ exception");                             \
-        llamar_failed_ = true;                                                 \
     }                                                                          \
-    /* outside the handler: the exception object is gone by now */             \
-    if (llamar_failed_) llamar_raise_(llamar_err_buf_);                        \
-    return R_NilValue;  /* not reached when llamar_failed_ */
+    /* outside the handler: the exception object is gone by now, and this is   \
+       the only way out of the catch tail -- no normal-flow return follows */  \
+    llamar_raise_(llamar_err_buf_);
 
 #endif // R_LLAMA_THROW_H
