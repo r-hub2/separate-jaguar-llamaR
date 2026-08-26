@@ -29,6 +29,8 @@
 #include <R.h>
 #include <Rinternals.h>
 
+#include "r_llama_ptr.h"  // type-checked externalptr arguments
+
 using json = nlohmann::ordered_json;
 
 namespace {
@@ -60,10 +62,8 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
                                    SEXP r_tools_json, SEXP r_tool_choice,
                                    SEXP r_json_schema, SEXP r_add_gen,
                                    SEXP r_enable_thinking) {
-    const llama_model * model = (const llama_model *) R_ExternalPtrAddr(r_model);
-    if (model == nullptr) {
-        Rf_error("llamaR: chat_build received a null model pointer");
-    }
+    const llama_model * model =
+        (const llama_model *) llamar_ptr_arg(r_model, "model");
 
     const std::string messages_json = sexp_to_string(r_messages_json);
     const std::string tools_json    = sexp_to_string(r_tools_json);

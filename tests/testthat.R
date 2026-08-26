@@ -10,8 +10,11 @@ library(llamaR)
 heavy <- c(
   "chat-build-roundtrip",   # llama_chat_build/parse build->generate->parse
   "serve-anthropic-e2e",    # llama_serve_anthropic spawned + driven over HTTP
-  "lora-multi",             # LoRA multi-adapter apply/remove/clear contract
-  "core-extra"              # generate_batch / memory_seq_add / embeddings_seq
+  "serve-openai-e2e",       # llama_serve_openai SSE streaming, raw + via ellmer
+  "lora-multi",             # LoRA multi-adapter apply/remove/clear + metadata
+  "core-extra",             # generate_batch / memory_seq_add / embeddings_seq
+  "state-seq",              # context + per-sequence state serialization
+  "cvec-perf-sampler"       # control vectors / llama_perf_sampler
 )
 
 on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")

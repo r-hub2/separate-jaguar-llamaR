@@ -4,10 +4,12 @@
 #include "llama-mmap.h"
 #include "llama-model.h"
 
+#include <algorithm>
 #include <map>
 #include <cassert>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 // vec
 

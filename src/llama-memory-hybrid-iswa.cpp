@@ -4,6 +4,10 @@
 #include "llama-model.h"
 #include "llama-context.h"
 
+#include <algorithm>
+#include <cassert>
+#include <utility>
+
 //
 // llama_memory_hybrid_iswa
 //

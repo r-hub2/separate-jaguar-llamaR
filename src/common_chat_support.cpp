@@ -23,6 +23,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 // --- string helpers (upstream common.cpp) ------------------------------------

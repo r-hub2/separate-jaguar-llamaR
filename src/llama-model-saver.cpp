@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
 bool llama_model_saver_supports_arch(llm_arch arch) {
     switch (arch) {

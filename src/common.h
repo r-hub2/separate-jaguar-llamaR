@@ -5,10 +5,13 @@
 #include "ggml-opt.h"
 #include "llama-cpp.h"
 
+#include <cstdlib>
 #include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 #include <map>
 

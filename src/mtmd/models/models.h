@@ -2,6 +2,10 @@
 
 #include "../clip-graph.h"
 
+// note: vision graphs commonly use std::min/std::max/std::copy; include
+// <algorithm> globally rather than relying on a transitive include
+#include <algorithm>
+
 /*
  * IMPORTANT: The mtmd module does NOT accept pull requests that are fully or predominantly AI-generated.
  * We encourage human contributors to ensure the quality and reliability of the codebase.

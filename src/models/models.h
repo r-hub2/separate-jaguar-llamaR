@@ -7,6 +7,12 @@
 // note: almost all graphs require at least sqrtf, so include cmath globally
 #include <cmath>
 
+// note: graphs commonly use std::copy/std::fill/std::min/std::max and
+// std::pair/std::move; include them globally rather than relying on them
+// arriving transitively (clang/libc++ does not provide them that way)
+#include <algorithm>
+#include <utility>
+
 //
 // base classes
 //

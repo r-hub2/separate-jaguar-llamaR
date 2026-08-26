@@ -38,6 +38,15 @@
 #undef length
 #endif
 
+#include "r_llama_ptr.h"  // type-checked externalptr arguments
+
+static inline mtmd_context * llamar_mtmd_ctx_arg(SEXP x) {
+    return (mtmd_context *) llamar_ptr_arg(x, "mtmd context");
+}
+static inline mtmd_bitmap * llamar_bitmap_arg(SEXP x) {
+    return (mtmd_bitmap *) llamar_ptr_arg(x, "bitmap");
+}
+
 // Logging verbosity shared with r_llama_interface.cpp's scheme (0 silent ..
 // 3 verbose). We keep an independent copy here; mtmd routes through its own
 // log callback set in r_mtmd_init.
@@ -77,8 +86,7 @@ static void mtmd_bitmap_finalizer(SEXP x) {
 
 extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
                             SEXP r_n_threads, SEXP r_use_gpu) {
-    llama_model * model = (llama_model *) R_ExternalPtrAddr(r_model);
-    if (!model) Rf_error("llamaR: invalid model pointer");
+    llama_model * model = (llama_model *) llamar_ptr_arg(r_model, "model");
 
     const char * mmproj = CHAR(STRING_ELT(r_mmproj_path, 0));
     const int n_threads = Rf_asInteger(r_n_threads);
@@ -105,14 +113,12 @@ extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
 }
 
 extern "C" SEXP r_mtmd_support_vision(SEXP r_mctx) {
-    mtmd_context * mctx = (mtmd_context *) R_ExternalPtrAddr(r_mctx);
-    if (!mctx) Rf_error("llamaR: invalid mtmd context pointer");
+    mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_vision(mctx));
 }
 
 extern "C" SEXP r_mtmd_support_audio(SEXP r_mctx) {
-    mtmd_context * mctx = (mtmd_context *) R_ExternalPtrAddr(r_mctx);
-    if (!mctx) Rf_error("llamaR: invalid mtmd context pointer");
+    mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_audio(mctx));
 }
 
@@ -130,8 +136,7 @@ extern "C" SEXP r_mtmd_set_verbosity(SEXP r_level) {
 // ============================================================
 
 extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
-    mtmd_context * mctx = (mtmd_context *) R_ExternalPtrAddr(r_mctx);
-    if (!mctx) Rf_error("llamaR: invalid mtmd context pointer");
+    mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
     mtmd_bitmap * bmp = mtmd_helper_bitmap_init_from_file(mctx, path);
@@ -151,12 +156,9 @@ extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
 
 extern "C" SEXP r_mtmd_eval(SEXP r_mctx, SEXP r_lctx, SEXP r_prompt,
                             SEXP r_bitmap, SEXP r_n_past) {
-    mtmd_context  * mctx = (mtmd_context *)  R_ExternalPtrAddr(r_mctx);
-    llama_context * lctx = (llama_context *) R_ExternalPtrAddr(r_lctx);
-    mtmd_bitmap   * bmp  = (mtmd_bitmap *)   R_ExternalPtrAddr(r_bitmap);
-    if (!mctx) Rf_error("llamaR: invalid mtmd context pointer");
-    if (!lctx) Rf_error("llamaR: invalid llama context pointer");
-    if (!bmp)  Rf_error("llamaR: invalid bitmap pointer");
+    mtmd_context  * mctx = llamar_mtmd_ctx_arg(r_mctx);
+    llama_context * lctx = (llama_context *) llamar_ptr_arg(r_lctx, "llama context");
+    mtmd_bitmap   * bmp  = llamar_bitmap_arg(r_bitmap);
 
     const char * prompt = CHAR(STRING_ELT(r_prompt, 0));
     const llama_pos n_past_in = (llama_pos) Rf_asInteger(r_n_past);

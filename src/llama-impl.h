@@ -2,6 +2,8 @@
 
 #include "ggml.h" // for ggml_log_level
 
+#include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 

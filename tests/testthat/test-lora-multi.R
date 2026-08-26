@@ -71,3 +71,63 @@ test_that("clear drops all adapters; a later remove returns -1", {
     # everything cleared -> the previously-active adapter is gone.
     expect_identical(llama_lora_remove(ctx, lora), -1L)
 })
+
+# ============================================================
+# Adapter metadata and aLoRA invocation tokens
+# ============================================================
+
+test_that("llama_lora_meta returns a named character vector", {
+    skip_if_no_lora()
+    model <- llama_load_model(MODEL_PATH)
+    on.exit(llama_free_model(model), add = TRUE)
+
+    lora <- llama_lora_load(model, LORA_PATH)
+    meta <- llama_lora_meta(lora)
+
+    expect_type(meta, "character")
+    # A GGUF adapter always records at least its architecture.
+    expect_gt(length(meta), 0L)
+    expect_false(is.null(names(meta)))
+    expect_true(all(nzchar(names(meta))))
+})
+
+test_that("llama_lora_meta_val agrees with llama_lora_meta", {
+    skip_if_no_lora()
+    model <- llama_load_model(MODEL_PATH)
+    on.exit(llama_free_model(model), add = TRUE)
+
+    lora <- llama_lora_load(model, LORA_PATH)
+    meta <- llama_lora_meta(lora)
+    skip_if(length(meta) == 0L, "adapter carries no metadata")
+
+    key <- names(meta)[1]
+    expect_equal(llama_lora_meta_val(lora, key), unname(meta[[key]]))
+})
+
+test_that("llama_lora_meta_val returns NULL for an absent key", {
+    skip_if_no_lora()
+    model <- llama_load_model(MODEL_PATH)
+    on.exit(llama_free_model(model), add = TRUE)
+
+    lora <- llama_lora_load(model, LORA_PATH)
+    expect_null(llama_lora_meta_val(lora, "llamar.no.such.key"))
+    expect_error(llama_lora_meta_val(lora, c("a", "b")))
+})
+
+test_that("an ordinary LoRA reports no aLoRA invocation tokens", {
+    skip_if_no_lora()
+    model <- llama_load_model(MODEL_PATH)
+    on.exit(llama_free_model(model), add = TRUE)
+
+    lora <- llama_lora_load(model, LORA_PATH)
+    toks <- llama_lora_alora_invocation_tokens(lora)
+
+    # Only an activated LoRA defines these; a plain adapter yields NULL.
+    if (!is.null(toks)) {
+        expect_type(toks, "integer")
+        expect_gt(length(toks), 0L)
+        expect_true(all(toks >= 0L))
+    } else {
+        expect_null(toks)
+    }
+})

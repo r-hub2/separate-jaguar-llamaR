@@ -164,6 +164,15 @@ llama_load_model <- function(path, n_gpu_layers = -1L, devices = NULL,
                              use_mmap = TRUE, use_mlock = FALSE) {
     stopifnot(is.character(path), length(path) == 1)
     if (!file.exists(path)) stop("llamaR: model file does not exist: ", path)
+
+    args <- llamar_model_load_args(n_gpu_layers, devices, split_mode)
+    .Call("r_llama_load_model", path, args$n_gpu_layers, devices,
+          args$split_mode, as.logical(use_mmap), as.logical(use_mlock))
+}
+
+# Validate and normalize the loading arguments shared by llama_load_model() and
+# llama_load_model_from_splits().
+llamar_model_load_args <- function(n_gpu_layers, devices, split_mode) {
     if (!is.null(devices)) stopifnot(is.character(devices))
 
     n_gpu_layers <- as.integer(n_gpu_layers)
@@ -178,8 +187,100 @@ llama_load_model <- function(path, n_gpu_layers = -1L, devices = NULL,
         "row"   = 2L,
         stop("split_mode must be 'none', 'layer', or 'row'"))
 
-    .Call("r_llama_load_model", path, n_gpu_layers, devices,
-          split_mode_int, as.logical(use_mmap), as.logical(use_mlock))
+    list(n_gpu_layers = n_gpu_layers, split_mode = split_mode_int)
+}
+
+#' Load a model split across several GGUF files
+#'
+#' [llama_load_model] already handles splits named with llama.cpp's own pattern
+#' (\code{<name>-00001-of-00003.gguf}): pointing it at the first chunk loads all
+#' of them. Use this function when the files do not follow that pattern and must
+#' be listed explicitly.
+#'
+#' @param paths Character vector of paths to the split files, \strong{in order}.
+#'   The order is not inferred from the names, so a wrong order yields a broken
+#'   model rather than an error.
+#' @inheritParams llama_load_model
+#' @return An external pointer wrapping the loaded model, exactly as
+#'   [llama_load_model] returns.
+#' @seealso [llama_load_model], [llama_split_path], [llama_split_prefix]
+#' @export
+#' @examples
+#' \dontrun{
+#' # Files with a custom naming scheme
+#' model <- llama_load_model_from_splits(c("part-a.gguf", "part-b.gguf"))
+#'
+#' # Standard naming: build the paths, then load them
+#' paths <- vapply(1:3, function(i) llama_split_path("model", i, 3), character(1))
+#' model <- llama_load_model_from_splits(paths)
+#'
+#' # ...though for the standard pattern this is enough:
+#' model <- llama_load_model("model-00001-of-00003.gguf")
+#' }
+llama_load_model_from_splits <- function(paths, n_gpu_layers = -1L, devices = NULL,
+                                         split_mode = "layer",
+                                         use_mmap = TRUE, use_mlock = FALSE) {
+    stopifnot(is.character(paths), length(paths) >= 1)
+    missing_files <- paths[!file.exists(paths)]
+    if (length(missing_files)) {
+        stop("llamaR: split file does not exist: ",
+             paste(missing_files, collapse = ", "))
+    }
+
+    args <- llamar_model_load_args(n_gpu_layers, devices, split_mode)
+    .Call("r_llama_load_model_from_splits", paths, args$n_gpu_layers, devices,
+          args$split_mode, as.logical(use_mmap), as.logical(use_mlock))
+}
+
+#' Build the path of one chunk of a split GGUF
+#'
+#' Applies llama.cpp's split naming pattern,
+#' \code{<prefix>-<split_no>-of-<split_count>.gguf}, with both numbers padded to
+#' five digits.
+#'
+#' @param prefix Path prefix, without the split suffix or the \code{.gguf}
+#'   extension (e.g. \code{"/models/ggml-model-q4_0"}).
+#' @param split_no Which chunk, counting from 1 --- the same number that appears
+#'   in the file name. (llama.cpp's C function counts from 0 here; the R
+#'   interface counts from 1 throughout.)
+#' @param split_count How many chunks in total.
+#' @return A character scalar with the full path.
+#' @seealso [llama_split_prefix], [llama_load_model_from_splits]
+#' @export
+#' @examples
+#' llama_split_path("/models/ggml-model-q4_0", 2, 4)
+#' # "/models/ggml-model-q4_0-00002-of-00004.gguf"
+llama_split_path <- function(prefix, split_no, split_count) {
+    stopifnot(is.character(prefix), length(prefix) == 1)
+    .Call("r_llama_split_path", prefix,
+          as.integer(split_no), as.integer(split_count))
+}
+
+#' Recover the prefix from a split GGUF path
+#'
+#' The inverse of [llama_split_path]. The path is only accepted when it really
+#' is chunk \code{split_no} of \code{split_count}; any other combination returns
+#' \code{NA}, which makes this usable as a test of whether a path matches a
+#' given split.
+#'
+#' @param path Path to one chunk of a split GGUF.
+#' @param split_no Which chunk the path is expected to be, counting from 1 ---
+#'   the number as it appears in the file name.
+#' @param split_count How many chunks the path is expected to be part of.
+#' @return A character scalar with the prefix, or \code{NA_character_} when the
+#'   path does not match \code{split_no} / \code{split_count}.
+#' @seealso [llama_split_path], [llama_load_model_from_splits]
+#' @export
+#' @examples
+#' llama_split_prefix("/models/ggml-model-q4_0-00002-of-00004.gguf", 2, 4)
+#' # "/models/ggml-model-q4_0"
+#'
+#' # Mismatched numbers: NA
+#' llama_split_prefix("/models/ggml-model-q4_0-00002-of-00004.gguf", 3, 4)
+llama_split_prefix <- function(path, split_no, split_count) {
+    stopifnot(is.character(path), length(path) == 1)
+    .Call("r_llama_split_prefix", path,
+          as.integer(split_no), as.integer(split_count))
 }
 
 #' Free a loaded model
@@ -215,6 +316,19 @@ llama_free_model <- function(model) {
 #'   - `has_encoder`: whether the model has an encoder
 #'   - `has_decoder`: whether the model has a decoder
 #'   - `is_recurrent`: whether the model is recurrent (e.g. Mamba)
+#'   - `is_hybrid`: whether the model mixes attention and recurrent layers
+#'     (e.g. Jamba, Qwen3.5)
+#'   - `is_diffusion`: whether the model is a diffusion LLM
+#'   - `n_embd_inp` / `n_embd_out`: input and output embedding widths, which
+#'     differ from `n_embd` on models whose projections are wider than the
+#'     residual stream
+#'   - `n_swa`: sliding-window attention span, `0` when attention is full-context
+#'   - `rope_type`: one of `"none"`, `"norm"`, `"neox"`, `"mrope"`, `"imrope"`,
+#'     `"vision"`
+#'   - `rope_freq_scale_train`: RoPE frequency scaling used during training
+#'   - `n_cls_out`: number of classifier outputs (`0` for ordinary LLMs)
+#' @seealso [llama_model_cls_labels], [llama_model_sampling_meta],
+#'   [llama_vocab_info]
 #' @export
 #' @examples
 #' \dontrun{
@@ -232,7 +346,75 @@ llama_model_info <- function(model) {
     info$has_encoder  <- .Call("r_llama_model_has_encoder", model)
     info$has_decoder  <- .Call("r_llama_model_has_decoder", model)
     info$is_recurrent <- .Call("r_llama_model_is_recurrent", model)
+    info$is_hybrid    <- .Call("r_llama_model_is_hybrid", model)
+    info$is_diffusion <- .Call("r_llama_model_is_diffusion", model)
+    info$n_embd_inp   <- .Call("r_llama_model_n_embd_inp", model)
+    info$n_embd_out   <- .Call("r_llama_model_n_embd_out", model)
+    info$n_swa        <- .Call("r_llama_model_n_swa", model)
+    info$rope_type    <- .Call("r_llama_model_rope_type", model)
+    info$rope_freq_scale_train <- .Call("r_llama_model_rope_freq_scale_train", model)
+    info$n_cls_out    <- .Call("r_llama_model_n_cls_out", model)
     info
+}
+
+#' Classifier output labels
+#'
+#' For classifier and reranker models, returns the label of each output. Plain
+#' generative models have no classifier head and return `NULL`.
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @return A character vector of length `llama_model_info(model)$n_cls_out`, or
+#'   `NULL` when the model is not a classifier or provides no labels. Individual
+#'   entries are `NA` when that output is unlabelled.
+#' @seealso [llama_model_info]
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("reranker.gguf")
+#' llama_model_cls_labels(model)
+#' }
+llama_model_cls_labels <- function(model) {
+    .Call("r_llama_model_cls_labels", model)
+}
+
+#' Token that starts decoding in encoder-decoder models
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @return An integer token ID, or `NA_integer_` when the model does not define
+#'   one (which is the case for all decoder-only models).
+#' @seealso [llama_model_info]
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("t5.gguf")
+#' llama_model_decoder_start_token(model)
+#' }
+llama_model_decoder_start_token <- function(model) {
+    .Call("r_llama_model_decoder_start_token", model)
+}
+
+#' Sampling parameters recommended by the model author
+#'
+#' Some GGUF files record the sampling settings their author recommends. This
+#' reads those keys out of the model metadata and returns the values that are
+#' present, so they can be passed on to [llama_generate].
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @return A named list of the recommended settings the model actually defines
+#'   (names such as `temp`, `top_k`, `top_p`, `min_p`), or an empty list when
+#'   the GGUF carries none. Values are returned as strings, exactly as stored.
+#' @seealso [llama_model_meta], [llama_model_meta_val], [llama_generate]
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' str(llama_model_sampling_meta(model))
+#' }
+llama_model_sampling_meta <- function(model) {
+    keys <- .Call("r_llama_model_sampling_meta_keys")
+    out  <- lapply(keys, function(k) if (is.na(k)) NULL else llama_model_meta_val(model, k))
+    names(out) <- names(keys)
+    out[!vapply(out, is.null, logical(1))]
 }
 
 #' Create an inference context
@@ -381,6 +563,426 @@ llama_detokenize <- function(ctx, tokens) {
     .Call("r_llama_detokenize", ctx, tokens)
 }
 
+#' Describe a sampler chain
+#'
+#' Bundles every sampling parameter into one list, which the generation
+#' functions ([llama_generate], [llama_gen_begin], [llama_gen_begin_at],
+#' [llama_generate_batch]) accept as their \code{sampler} argument. Use it to
+#' reach the samplers that have no dedicated argument on those functions --- DRY,
+#' XTC, dynamic temperature, top-n-sigma, logit bias, infill and adaptive-p.
+#'
+#' The chain is assembled in the same order llama.cpp itself uses:
+#' grammar, logit bias, penalties, DRY, top-n-sigma, top-k, typical-p, top-p,
+#' min-p, XTC, infill, temperature, and finally a token-selecting sampler
+#' (greedy when \code{temp <= 0}, adaptive-p when enabled, otherwise
+#' distribution sampling). Setting \code{mirostat} to 1 or 2 replaces the whole
+#' truncation section with temperature + Mirostat, as upstream does.
+#'
+#' @param temp Sampling temperature. 0 or less = greedy decoding.
+#' @param top_k Top-K filtering (0 = disabled)
+#' @param top_p Top-P (nucleus) filtering (1.0 = disabled)
+#' @param min_p Min-P filtering threshold (0.0 = disabled)
+#' @param typical_p Locally typical sampling threshold (1.0 = disabled)
+#' @param seed Random seed for sampling
+#' @param min_keep Minimum number of candidates the truncation samplers must
+#'   leave in place (1 = upstream default)
+#' @param repeat_penalty Repetition penalty (1.0 = disabled)
+#' @param repeat_last_n Number of last tokens to penalize (0 = disabled,
+#'   -1 = context size)
+#' @param frequency_penalty Frequency penalty (0.0 = disabled)
+#' @param presence_penalty Presence penalty (0.0 = disabled)
+#' @param mirostat Mirostat sampling mode (0 = disabled, 1 = Mirostat,
+#'   2 = Mirostat 2.0)
+#' @param mirostat_tau Mirostat target entropy (tau parameter)
+#' @param mirostat_eta Mirostat learning rate (eta parameter)
+#' @param dynatemp_range Dynamic-temperature range (0.0 = plain temperature).
+#'   The temperature varies within \code{temp +/- dynatemp_range} according to
+#'   the entropy of the distribution.
+#' @param dynatemp_exponent Controls how entropy maps to temperature in dynamic
+#'   temperature sampling.
+#' @param xtc_probability Probability of applying XTC ("exclude top choices")
+#'   at each step (0.0 = disabled)
+#' @param xtc_threshold XTC probability threshold; above 0.5 disables XTC
+#' @param top_n_sigma Top-n-sigma filtering, in standard deviations of the
+#'   logit distribution (negative = disabled)
+#' @param dry_multiplier DRY repetition-penalty multiplier (0.0 = disabled)
+#' @param dry_base DRY penalty base; the penalty grows as
+#'   \code{dry_multiplier * dry_base ^ (repeat length - dry_allowed_length)}
+#' @param dry_allowed_length Repetitions longer than this are penalized
+#' @param dry_penalty_last_n How many recent tokens DRY scans for repetitions
+#'   (0 = disabled, -1 = context size)
+#' @param dry_sequence_breakers Character vector of strings that reset DRY's
+#'   repetition tracking
+#' @param adaptive_target Adaptive-p target probability (negative = disabled).
+#'   When enabled it selects the token instead of distribution sampling.
+#' @param adaptive_decay EMA decay used by adaptive-p; the history spans about
+#'   \code{1 / (1 - adaptive_decay)} tokens
+#' @param infill If TRUE, add the fill-in-the-middle sampler (for FIM models)
+#' @param logit_bias Per-token logit adjustment, as a list with integer
+#'   \code{token} and numeric \code{bias} of equal length, e.g.
+#'   \code{list(token = c(15L, 22L), bias = c(-5, 2))}. \code{NULL} = none.
+#' @return A named list of sampler parameters, to be passed as the
+#'   \code{sampler} argument of the generation functions.
+#' @seealso [llama_generate], [llama_gen_begin], [llama_generate_batch]
+#' @export
+#' @examples
+#' \dontrun{
+#' # DRY repetition penalty plus XTC
+#' sp <- llama_sampler_params(temp = 0.9, dry_multiplier = 0.8,
+#'                            xtc_probability = 0.5)
+#' llama_generate(ctx, "Tell me a story", sampler = sp)
+#'
+#' # Dynamic temperature
+#' sp <- llama_sampler_params(temp = 1.0, dynatemp_range = 0.5)
+#'
+#' # Suppress a specific token
+#' sp <- llama_sampler_params(logit_bias = list(token = 1234L, bias = -100))
+#' }
+llama_sampler_params <- function(temp = 0.8, top_k = 50L, top_p = 0.9,
+                                 min_p = 0.0, typical_p = 1.0, seed = 42L,
+                                 min_keep = 1L,
+                                 repeat_penalty = 1.0, repeat_last_n = 64L,
+                                 frequency_penalty = 0.0, presence_penalty = 0.0,
+                                 mirostat = 0L, mirostat_tau = 5.0,
+                                 mirostat_eta = 0.1,
+                                 dynatemp_range = 0.0, dynatemp_exponent = 1.0,
+                                 xtc_probability = 0.0, xtc_threshold = 0.1,
+                                 top_n_sigma = -1.0,
+                                 dry_multiplier = 0.0, dry_base = 1.75,
+                                 dry_allowed_length = 2L,
+                                 dry_penalty_last_n = -1L,
+                                 dry_sequence_breakers = c("\n", ":", "\"", "*"),
+                                 adaptive_target = -1.0, adaptive_decay = 0.9,
+                                 infill = FALSE, logit_bias = NULL) {
+    if (!is.null(logit_bias)) {
+        if (!is.list(logit_bias) ||
+            is.null(logit_bias$token) || is.null(logit_bias$bias)) {
+            stop("logit_bias must be a list with 'token' and 'bias' elements")
+        }
+        if (length(logit_bias$token) != length(logit_bias$bias)) {
+            stop("logit_bias 'token' and 'bias' must have the same length")
+        }
+        logit_bias <- list(token = as.integer(logit_bias$token),
+                           bias  = as.double(logit_bias$bias))
+    }
+    list(temp                  = as.double(temp),
+         top_k                 = as.integer(top_k),
+         top_p                 = as.double(top_p),
+         min_p                 = as.double(min_p),
+         typical_p             = as.double(typical_p),
+         seed                  = as.integer(seed),
+         min_keep              = as.integer(min_keep),
+         repeat_penalty        = as.double(repeat_penalty),
+         repeat_last_n         = as.integer(repeat_last_n),
+         frequency_penalty     = as.double(frequency_penalty),
+         presence_penalty      = as.double(presence_penalty),
+         mirostat              = as.integer(mirostat),
+         mirostat_tau          = as.double(mirostat_tau),
+         mirostat_eta          = as.double(mirostat_eta),
+         dynatemp_range        = as.double(dynatemp_range),
+         dynatemp_exponent     = as.double(dynatemp_exponent),
+         xtc_probability       = as.double(xtc_probability),
+         xtc_threshold         = as.double(xtc_threshold),
+         top_n_sigma           = as.double(top_n_sigma),
+         dry_multiplier        = as.double(dry_multiplier),
+         dry_base              = as.double(dry_base),
+         dry_allowed_length    = as.integer(dry_allowed_length),
+         dry_penalty_last_n    = as.integer(dry_penalty_last_n),
+         dry_sequence_breakers = as.character(dry_sequence_breakers),
+         adaptive_target       = as.double(adaptive_target),
+         adaptive_decay        = as.double(adaptive_decay),
+         infill                = as.logical(infill),
+         logit_bias            = logit_bias)
+}
+
+# Resolve the sampler argument of a generation function. When `sampler` is
+# supplied it wins outright; otherwise the flat per-call arguments (kept for
+# backward compatibility) are folded into a parameter list. `flat` holds the
+# caller's flat arguments, already named as llama_sampler_params() expects.
+#
+# A chain handle from the chain API passes straight through: the C side copies
+# it for the generation rather than using it in place.
+llamar_resolve_sampler <- function(sampler, flat) {
+    if (!is.null(sampler)) {
+        if (inherits(sampler, "llama_sampler_chain")) {
+            return(sampler)
+        }
+        if (inherits(sampler, "llama_sampler")) {
+            stop("sampler must be a chain, not a single sampler; ",
+                 "add it to a chain with llama_sampler_chain_add()")
+        }
+        if (!is.list(sampler)) {
+            stop("sampler must be a parameter list from llama_sampler_params() ",
+                 "or a chain from llama_sampler_chain_new()")
+        }
+        return(sampler)
+    }
+    do.call(llama_sampler_params, flat)
+}
+
+# ============================================================
+# Sampler chain API
+# ============================================================
+
+#' Create an empty sampler chain
+#'
+#' Builds a chain by hand, one sampler at a time, as the imperative counterpart
+#' to the declarative [llama_sampler_params]. Add samplers with
+#' [llama_sampler_chain_add], inspect them with [llama_sampler_chain_get] and
+#' [llama_sampler_chain_n], and take them back out with
+#' [llama_sampler_chain_remove].
+#'
+#' \strong{Ownership.} A chain takes ownership of every sampler added to it and
+#' frees them when the chain itself is freed. A handle whose sampler has been
+#' taken over this way cannot be freed on its own, and using it after its chain
+#' is gone raises an error rather than crashing. [llama_sampler_chain_remove]
+#' hands ownership back to R, which also retires any older handle to that same
+#' sampler.
+#'
+#' Chains are freed by the garbage collector, so [llama_sampler_free] is
+#' optional.
+#'
+#' @param no_perf If TRUE, skip the chain's own performance measurements.
+#'   \code{NULL} (default) keeps llama.cpp's default.
+#' @return An external pointer of class \code{"llama_sampler_chain"}.
+#' @seealso [llama_sampler_new], [llama_sampler_chain_add],
+#'   [llama_sampler_chain_from_params]
+#' @export
+#' @examples
+#' \dontrun{
+#' chain <- llama_sampler_chain_new()
+#' llama_sampler_chain_add(chain, llama_sampler_new("top_k", top_k = 40L))
+#' llama_sampler_chain_add(chain, llama_sampler_new("temp", temp = 0.7))
+#' llama_sampler_chain_add(chain, llama_sampler_new("dist", seed = 42L))
+#' llama_sampler_chain_n(chain)  # 3
+#' }
+llama_sampler_chain_new <- function(no_perf = NULL) {
+    .Call("r_llama_sampler_chain_new",
+          if (is.null(no_perf)) NULL else as.logical(no_perf))
+}
+
+#' Create a single sampler
+#'
+#' Builds one standalone sampler, to be added to a chain with
+#' [llama_sampler_chain_add]. Parameters are taken from the named arguments in
+#' \code{...}, using the same names and defaults as [llama_sampler_params], so
+#' a sampler built here behaves exactly like its counterpart in the declarative
+#' chain.
+#'
+#' Recognized kinds:
+#' \itemize{
+#'   \item Selection: \code{"greedy"}, \code{"dist"}, \code{"adaptive_p"},
+#'     \code{"mirostat"}, \code{"mirostat_v2"}
+#'   \item Truncation: \code{"top_k"}, \code{"top_p"}, \code{"min_p"},
+#'     \code{"typical"}, \code{"top_n_sigma"}, \code{"xtc"}
+#'   \item Temperature: \code{"temp"}, \code{"temp_ext"}
+#'   \item Penalties: \code{"penalties"}, \code{"dry"}
+#'   \item Other: \code{"logit_bias"}, \code{"infill"}
+#' }
+#'
+#' \code{"mirostat"}, \code{"dry"}, \code{"logit_bias"} and \code{"infill"} read
+#' the model's vocabulary, so they require \code{model}.
+#'
+#' @param kind Character scalar naming the sampler; see the list above.
+#' @param ... Named sampler parameters, as accepted by [llama_sampler_params].
+#' @param model Model handle from [llama_load_model], required by the kinds
+#'   noted above and ignored by the rest.
+#' @return An external pointer of class \code{"llama_sampler"}.
+#' @seealso [llama_sampler_chain_new], [llama_sampler_chain_add]
+#' @export
+#' @examples
+#' \dontrun{
+#' s <- llama_sampler_new("top_k", top_k = 40L)
+#' llama_sampler_name(s)  # "top-k"
+#'
+#' # kinds that need the vocabulary
+#' d <- llama_sampler_new("dry", dry_multiplier = 0.8, model = model)
+#' }
+llama_sampler_new <- function(kind, ..., model = NULL) {
+    stopifnot(is.character(kind), length(kind) == 1)
+    args <- list(...)
+    if (length(args) && is.null(names(args))) {
+        stop("sampler parameters in `...` must be named")
+    }
+    .Call("r_llama_sampler_new", kind,
+          do.call(llama_sampler_params, args), model)
+}
+
+#' Build a sampler chain from a parameter list
+#'
+#' Assembles the same chain the generation functions build internally from a
+#' [llama_sampler_params] list, but hands it back for inspection or adjustment.
+#' Use it to see which samplers a given parameter list actually produces, and in
+#' what order.
+#'
+#' @param ctx Context handle returned by [llama_new_context]. The chain reads
+#'   the model's vocabulary, so it is tied to this context's model.
+#' @param params A parameter list from [llama_sampler_params].
+#' @param grammar GBNF grammar string, or \code{NULL}.
+#' @param trigger_patterns,trigger_tokens Lazy-grammar triggers; see
+#'   [llama_generate].
+#' @return An external pointer of class \code{"llama_sampler_chain"}.
+#' @seealso [llama_sampler_params], [llama_sampler_chain_new]
+#' @export
+#' @examples
+#' \dontrun{
+#' sp <- llama_sampler_params(temp = 0.8, dry_multiplier = 0.8)
+#' chain <- llama_sampler_chain_from_params(ctx, sp)
+#' vapply(seq_len(llama_sampler_chain_n(chain)) - 1L,
+#'        function(i) llama_sampler_name(llama_sampler_chain_get(chain, i)),
+#'        character(1))
+#' }
+llama_sampler_chain_from_params <- function(ctx, params, grammar = NULL,
+                                            trigger_patterns = NULL,
+                                            trigger_tokens = NULL) {
+    stopifnot(is.list(params))
+    .Call("r_llama_sampler_chain_from_params", ctx, params, grammar,
+          if (is.null(trigger_patterns)) NULL else as.character(trigger_patterns),
+          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens))
+}
+
+#' Add a sampler to a chain
+#'
+#' The chain takes ownership of \code{sampler}: it is freed together with the
+#' chain, cannot be freed on its own, and cannot be added to a second chain.
+#' The handle stays usable for inspection while the chain lives.
+#'
+#' @param chain A chain from [llama_sampler_chain_new] or
+#'   [llama_sampler_chain_from_params].
+#' @param sampler A sampler from [llama_sampler_new], not yet owned by any chain.
+#' @return \code{chain}, invisibly, so calls can be piped.
+#' @seealso [llama_sampler_chain_remove], [llama_sampler_chain_n]
+#' @export
+llama_sampler_chain_add <- function(chain, sampler) {
+    .Call("r_llama_sampler_chain_add", chain, sampler)
+    invisible(chain)
+}
+
+#' Number of samplers in a chain
+#'
+#' @param chain A sampler chain.
+#' @return Integer count of samplers currently in the chain.
+#' @seealso [llama_sampler_chain_get]
+#' @export
+llama_sampler_chain_n <- function(chain) {
+    .Call("r_llama_sampler_chain_n", chain)
+}
+
+#' Get a sampler out of a chain
+#'
+#' Returns a \emph{borrowed} handle: the chain keeps ownership, so the returned
+#' sampler must not be freed and stops being usable once the chain is gone.
+#' Use [llama_sampler_chain_remove] to take a sampler out for keeps.
+#'
+#' @param chain A sampler chain.
+#' @param i Zero-based index of the sampler, matching llama.cpp's own indexing.
+#'   \code{-1} returns the chain itself, as a borrowed handle --- useful only to
+#'   confirm that \code{chain} really is a chain.
+#' @return An external pointer of class \code{"llama_sampler"}.
+#' @seealso [llama_sampler_chain_n], [llama_sampler_chain_remove]
+#' @export
+llama_sampler_chain_get <- function(chain, i) {
+    .Call("r_llama_sampler_chain_get", chain, as.integer(i))
+}
+
+#' Remove a sampler from a chain
+#'
+#' Detaches the sampler at index \code{i} and hands ownership back to R, so the
+#' returned handle is freed on its own (by the garbage collector, or by
+#' [llama_sampler_free]). Any handle obtained earlier for that same sampler ---
+#' from [llama_sampler_chain_add] or [llama_sampler_chain_get] --- is retired by
+#' this call and raises an error if used afterwards.
+#'
+#' @param chain A sampler chain.
+#' @param i Zero-based index of the sampler to remove.
+#' @return An external pointer of class \code{"llama_sampler"}, now owned by R.
+#' @seealso [llama_sampler_chain_add], [llama_sampler_chain_get]
+#' @export
+llama_sampler_chain_remove <- function(chain, i) {
+    .Call("r_llama_sampler_chain_remove", chain, as.integer(i))
+}
+
+#' Name of a sampler
+#'
+#' @param sampler A sampler or sampler chain.
+#' @return A character scalar with llama.cpp's name for the sampler, e.g.
+#'   \code{"top-k"}, or \code{""} when it has none.
+#' @export
+llama_sampler_name <- function(sampler) {
+    .Call("r_llama_sampler_name", sampler)
+}
+
+#' Reset a sampler's internal state
+#'
+#' Clears whatever state a sampler carries between tokens --- Mirostat's
+#' \code{mu}, adaptive-p's moving average, the penalty samplers' token history.
+#' Applied to a chain, it resets every sampler in it.
+#'
+#' @param sampler A sampler or sampler chain.
+#' @return \code{NULL}, invisibly.
+#' @export
+llama_sampler_reset <- function(sampler) {
+    .Call("r_llama_sampler_reset", sampler)
+    invisible(NULL)
+}
+
+#' Copy a sampler
+#'
+#' Returns an independent copy, including any accumulated state, owned by R.
+#' Cloning a chain clones every sampler in it. Not every sampler supports
+#' cloning; those that do not raise an error.
+#'
+#' @param sampler A sampler or sampler chain.
+#' @return A new external pointer of the same class as \code{sampler}.
+#' @export
+llama_sampler_clone <- function(sampler) {
+    .Call("r_llama_sampler_clone", sampler)
+}
+
+#' Feed a token to a sampler
+#'
+#' Advances the samplers that track generation history --- the penalty samplers,
+#' DRY, grammar --- without sampling anything. Only needed when driving a
+#' sampler by hand; the generation functions do this themselves.
+#'
+#' @param sampler A sampler or sampler chain.
+#' @param token Integer token ID.
+#' @return \code{NULL}, invisibly.
+#' @export
+llama_sampler_accept <- function(sampler, token) {
+    .Call("r_llama_sampler_accept", sampler, as.integer(token))
+    invisible(NULL)
+}
+
+#' Seed used by a sampler
+#'
+#' @param sampler A sampler or sampler chain. For a chain, the seed of the first
+#'   seeded sampler in it.
+#' @return The seed as an integer, or \code{NA_integer_} when the sampler has no
+#'   seed of its own (or the seed does not fit in an R integer).
+#' @export
+llama_sampler_get_seed <- function(sampler) {
+    .Call("r_llama_sampler_get_seed", sampler)
+}
+
+#' Free a sampler or chain
+#'
+#' Releases the sampler immediately instead of waiting for the garbage
+#' collector, which frees it anyway. Freeing a chain also frees every sampler
+#' inside it, and handles to those samplers raise an error afterwards rather
+#' than reaching freed memory. A sampler a chain has taken over cannot be freed
+#' on its own --- free the chain instead.
+#'
+#' Freeing an already-freed handle does nothing.
+#'
+#' @param sampler A sampler or sampler chain.
+#' @return \code{NULL}, invisibly.
+#' @export
+llama_sampler_free <- function(sampler) {
+    .Call("r_llama_sampler_free", sampler)
+    invisible(NULL)
+}
+
 #' Generate text from a prompt
 #'
 #' Tokenizes the prompt, runs the full autoregressive decode loop with sampling,
@@ -410,6 +1012,23 @@ llama_detokenize <- function(ctx, tokens) {
 #' @param trigger_tokens Integer vector of token IDs that lazily activate the
 #'   grammar, the token-level counterpart to \code{trigger_patterns}. \code{NULL}
 #'   (default) means none.
+#' @param sampler Either a sampler-parameter list from
+#'   \code{\link{llama_sampler_params}}, or a chain built by hand with
+#'   \code{\link{llama_sampler_chain_new}}. When supplied it takes precedence
+#'   over the individual sampling arguments above, and a parameter list is the
+#'   only way to reach the samplers that have no argument here (DRY, XTC,
+#'   dynamic temperature, top-n-sigma, logit bias, infill, adaptive-p).
+#'   \code{NULL} (default) builds the chain from the individual arguments.
+#'
+#'   A supplied chain is \strong{copied} for the generation, so the caller's
+#'   chain is left untouched and its lifetime is its own concern.
+#' @param sampler_reset Only meaningful when \code{sampler} is a chain. If
+#'   \code{TRUE} (default), the copy starts with its accumulated state cleared
+#'   --- Mirostat's \code{mu}, adaptive-p's moving average, the penalty
+#'   samplers' token history --- so repeated calls with one chain behave
+#'   identically, as they do on the parameter-list path. Set \code{FALSE} to
+#'   carry that state into the generation and deliberately continue where an
+#'   earlier one left off.
 #' @param with_timings If TRUE, attach a named numeric vector of per-stage
 #'   timings (in ms) as attribute "timings" of the returned text. Stages:
 #'   tokenize, build_sampler, kv_clear, prefill_dispatch, prefill_sync,
@@ -452,18 +1071,22 @@ llama_generate <- function(ctx, prompt, max_new_tokens = 256L,
                            frequency_penalty = 0.0, presence_penalty = 0.0,
                            mirostat = 0L, mirostat_tau = 5.0, mirostat_eta = 0.1,
                            grammar = NULL, with_timings = FALSE,
-                           trigger_patterns = NULL, trigger_tokens = NULL) {
+                           trigger_patterns = NULL, trigger_tokens = NULL,
+                           sampler = NULL, sampler_reset = TRUE) {
     stopifnot(is.character(prompt), length(prompt) == 1)
+    sp <- llamar_resolve_sampler(sampler, list(
+        temp = temp, top_k = top_k, top_p = top_p, seed = seed,
+        min_p = min_p, typical_p = typical_p,
+        repeat_penalty = repeat_penalty, repeat_last_n = repeat_last_n,
+        frequency_penalty = frequency_penalty, presence_penalty = presence_penalty,
+        mirostat = mirostat, mirostat_tau = mirostat_tau,
+        mirostat_eta = mirostat_eta))
     .Call("r_llama_generate", ctx, prompt,
-          as.integer(max_new_tokens), as.double(temp),
-          as.integer(top_k), as.double(top_p), as.integer(seed),
-          as.double(min_p), as.double(typical_p),
-          as.double(repeat_penalty), as.integer(repeat_last_n),
-          as.double(frequency_penalty), as.double(presence_penalty),
-          as.integer(mirostat), as.double(mirostat_tau), as.double(mirostat_eta),
+          as.integer(max_new_tokens), sp,
           grammar, as.logical(with_timings),
           if (is.null(trigger_patterns)) NULL else as.character(trigger_patterns),
-          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens))
+          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens),
+          as.logical(sampler_reset))
 }
 
 #' Begin a streaming (token-by-token) generation
@@ -501,18 +1124,21 @@ llama_gen_begin <- function(ctx, prompt, max_new_tokens = 256L,
                             frequency_penalty = 0.0, presence_penalty = 0.0,
                             mirostat = 0L, mirostat_tau = 5.0, mirostat_eta = 0.1,
                             grammar = NULL,
-                            trigger_patterns = NULL, trigger_tokens = NULL) {
+                            trigger_patterns = NULL, trigger_tokens = NULL,
+                            sampler = NULL, sampler_reset = TRUE) {
     stopifnot(is.character(prompt), length(prompt) == 1)
+    sp <- llamar_resolve_sampler(sampler, list(
+        temp = temp, top_k = top_k, top_p = top_p, seed = seed,
+        min_p = min_p, typical_p = typical_p,
+        repeat_penalty = repeat_penalty, repeat_last_n = repeat_last_n,
+        frequency_penalty = frequency_penalty, presence_penalty = presence_penalty,
+        mirostat = mirostat, mirostat_tau = mirostat_tau,
+        mirostat_eta = mirostat_eta))
     .Call("r_llama_gen_begin", ctx, prompt,
-          as.integer(max_new_tokens), as.double(temp),
-          as.integer(top_k), as.double(top_p), as.integer(seed),
-          as.double(min_p), as.double(typical_p),
-          as.double(repeat_penalty), as.integer(repeat_last_n),
-          as.double(frequency_penalty), as.double(presence_penalty),
-          as.integer(mirostat), as.double(mirostat_tau), as.double(mirostat_eta),
-          grammar,
+          as.integer(max_new_tokens), sp, grammar,
           if (is.null(trigger_patterns)) NULL else as.character(trigger_patterns),
-          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens))
+          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens),
+          as.logical(sampler_reset))
 }
 
 #' Begin streaming generation from an already-prefilled context
@@ -540,18 +1166,21 @@ llama_gen_begin_at <- function(ctx, n_past, max_new_tokens = 256L,
                                frequency_penalty = 0.0, presence_penalty = 0.0,
                                mirostat = 0L, mirostat_tau = 5.0, mirostat_eta = 0.1,
                                grammar = NULL,
-                               trigger_patterns = NULL, trigger_tokens = NULL) {
+                               trigger_patterns = NULL, trigger_tokens = NULL,
+                               sampler = NULL, sampler_reset = TRUE) {
     stopifnot(inherits(ctx, "externalptr"))
+    sp <- llamar_resolve_sampler(sampler, list(
+        temp = temp, top_k = top_k, top_p = top_p, seed = seed,
+        min_p = min_p, typical_p = typical_p,
+        repeat_penalty = repeat_penalty, repeat_last_n = repeat_last_n,
+        frequency_penalty = frequency_penalty, presence_penalty = presence_penalty,
+        mirostat = mirostat, mirostat_tau = mirostat_tau,
+        mirostat_eta = mirostat_eta))
     .Call("r_llama_gen_begin_at", ctx, as.integer(n_past),
-          as.integer(max_new_tokens), as.double(temp),
-          as.integer(top_k), as.double(top_p), as.integer(seed),
-          as.double(min_p), as.double(typical_p),
-          as.double(repeat_penalty), as.integer(repeat_last_n),
-          as.double(frequency_penalty), as.double(presence_penalty),
-          as.integer(mirostat), as.double(mirostat_tau), as.double(mirostat_eta),
-          grammar,
+          as.integer(max_new_tokens), sp, grammar,
           if (is.null(trigger_patterns)) NULL else as.character(trigger_patterns),
-          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens))
+          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens),
+          as.logical(sampler_reset))
 }
 
 #' Pull the next chunk of a streaming generation
@@ -609,15 +1238,19 @@ llama_gen_end <- function(state) {
 #' across sequences in this version.
 #'
 #' Stop conditions per sequence: end-of-generation token (model-defined) or
-#' \code{max_new_tokens} reached. Mirostat and \code{with_timings} are not
-#' supported here yet — use \code{\link{llama_generate}} for those.
+#' \code{max_new_tokens} reached. \code{with_timings} is not supported here —
+#' use \code{\link{llama_generate}} for that.
 #'
 #' @param ctx Context handle returned by [llama_new_context], created with
 #'   sufficient \code{n_seq_max} and \code{n_ctx} (see Details).
 #' @param prompts Character vector of prompts, one per parallel sequence.
-#' @param max_new_tokens,temp,top_k,top_p,seed,min_p,typical_p,repeat_penalty,repeat_last_n,frequency_penalty,presence_penalty,grammar
+#' @param max_new_tokens,temp,top_k,top_p,seed,min_p,typical_p,repeat_penalty,repeat_last_n,frequency_penalty,presence_penalty,mirostat,mirostat_tau,mirostat_eta,grammar,trigger_patterns,trigger_tokens,sampler
 #'   Sampling parameters; see \code{\link{llama_generate}}. Shared across
-#'   sequences. \code{seed} is offset per sequence (\code{seed + s}).
+#'   sequences. \code{seed} is offset per sequence (\code{seed + s}), so each
+#'   sequence samples independently. For that reason \code{sampler} accepts only
+#'   a parameter list here, not a chain: every sequence needs its own differently
+#'   seeded chain, which one supplied chain cannot provide. Passing a chain is
+#'   an error rather than being silently ignored.
 #' @return A list of length \code{length(prompts)}, in the same order as the
 #'   input. Each element is a list with fields:
 #'   \itemize{
@@ -650,15 +1283,22 @@ llama_generate_batch <- function(ctx, prompts, max_new_tokens = 256L,
                                  min_p = 0.0, typical_p = 1.0,
                                  repeat_penalty = 1.0, repeat_last_n = 64L,
                                  frequency_penalty = 0.0, presence_penalty = 0.0,
-                                 grammar = NULL) {
+                                 mirostat = 0L, mirostat_tau = 5.0,
+                                 mirostat_eta = 0.1, grammar = NULL,
+                                 trigger_patterns = NULL, trigger_tokens = NULL,
+                                 sampler = NULL) {
     stopifnot(is.character(prompts), length(prompts) >= 1)
+    sp <- llamar_resolve_sampler(sampler, list(
+        temp = temp, top_k = top_k, top_p = top_p, seed = seed,
+        min_p = min_p, typical_p = typical_p,
+        repeat_penalty = repeat_penalty, repeat_last_n = repeat_last_n,
+        frequency_penalty = frequency_penalty, presence_penalty = presence_penalty,
+        mirostat = mirostat, mirostat_tau = mirostat_tau,
+        mirostat_eta = mirostat_eta))
     .Call("r_llama_generate_batch", ctx, prompts,
-          as.integer(max_new_tokens), as.double(temp),
-          as.integer(top_k), as.double(top_p), as.integer(seed),
-          as.double(min_p), as.double(typical_p),
-          as.double(repeat_penalty), as.integer(repeat_last_n),
-          as.double(frequency_penalty), as.double(presence_penalty),
-          grammar)
+          as.integer(max_new_tokens), sp, grammar,
+          if (is.null(trigger_patterns)) NULL else as.character(trigger_patterns),
+          if (is.null(trigger_tokens)) NULL else as.integer(trigger_tokens))
 }
 
 #' Extract embeddings for a text
@@ -1030,6 +1670,113 @@ llama_lora_clear <- function(ctx) {
     invisible(NULL)
 }
 
+#' Read the metadata of a LoRA adapter
+#'
+#' `llama_lora_meta()` returns every GGUF metadata entry stored in the adapter;
+#' `llama_lora_meta_val()` looks up a single key. This is the adapter-level
+#' counterpart of [llama_model_meta] / [llama_model_meta_val].
+#'
+#' @param lora LoRA adapter handle returned by [llama_lora_load]
+#' @param key A single string naming the metadata key to look up.
+#' @return `llama_lora_meta()`: a named character vector, possibly empty.
+#'   `llama_lora_meta_val()`: a character string, or `NULL` when the key is
+#'   absent.
+#' @name llama_lora_meta
+#' @seealso [llama_lora_load], [llama_model_meta]
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' lora  <- llama_lora_load(model, "adapter.gguf")
+#' llama_lora_meta(lora)
+#' llama_lora_meta_val(lora, "general.name")
+#' }
+NULL
+
+#' @rdname llama_lora_meta
+#' @export
+llama_lora_meta <- function(lora) {
+    .Call("r_llama_lora_meta", lora)
+}
+
+#' @rdname llama_lora_meta
+#' @export
+llama_lora_meta_val <- function(lora, key) {
+    stopifnot(is.character(key), length(key) == 1)
+    .Call("r_llama_lora_meta_val", lora, key)
+}
+
+#' Invocation tokens of an activated LoRA (aLoRA)
+#'
+#' An activated LoRA carries a token sequence that switches it on: the adapter
+#' only takes effect once those tokens appear in the context. Ordinary LoRAs
+#' apply unconditionally and define no invocation tokens.
+#'
+#' @param lora LoRA adapter handle returned by [llama_lora_load]
+#' @return An integer vector of token IDs, or `NULL` when the adapter is an
+#'   ordinary LoRA.
+#' @seealso [llama_lora_load], [llama_detokenize]
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' lora  <- llama_lora_load(model, "alora.gguf")
+#' toks  <- llama_lora_alora_invocation_tokens(lora)
+#' if (!is.null(toks)) llama_detokenize(model, toks)
+#' }
+llama_lora_alora_invocation_tokens <- function(lora) {
+    .Call("r_llama_lora_alora_invocation_tokens", lora)
+}
+
+#' Apply a control vector to a context
+#'
+#' A control vector steers generation by adding a fixed direction to the
+#' residual stream of a layer range. Unlike a LoRA it is applied directly to the
+#' context and needs no adapter file.
+#'
+#' `data` holds the direction for each layer laid end to end: `n_embd` values
+#' for layer `il_start`, then `n_embd` for the next layer, and so on. Pass
+#' `data = NULL` to remove a control vector already applied to the context.
+#'
+#' @param ctx Context handle returned by [llama_new_context]
+#' @param data Numeric vector of length `n_embd * (il_end - il_start + 1)`, or
+#'   `NULL` to clear the current control vector.
+#' @param n_embd Embedding dimension of the model, i.e.
+#'   `llama_model_info(model)$n_embd`.
+#' @param il_start,il_end First and last layer index the vector applies to.
+#' @return `NULL`, invisibly. Errors when the dimensions do not match the model.
+#' @seealso [llama_lora_apply], [llama_model_info]
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' ctx   <- llama_new_context(model)
+#' n_embd <- llama_model_info(model)$n_embd
+#'
+#' # A steering direction for layers 10..20
+#' n_layers <- 20 - 10 + 1
+#' vec <- rnorm(n_embd * n_layers) * 0.1
+#' llama_apply_control_vector(ctx, vec, n_embd, il_start = 10L, il_end = 20L)
+#'
+#' llama_apply_control_vector(ctx, NULL, n_embd, 10L, 20L)   # clear it again
+#' }
+llama_apply_control_vector <- function(ctx, data, n_embd, il_start, il_end) {
+    n_embd   <- as.integer(n_embd)
+    il_start <- as.integer(il_start)
+    il_end   <- as.integer(il_end)
+
+    if (!is.null(data)) {
+        expected <- n_embd * (il_end - il_start + 1L)
+        if (length(data) != expected) {
+            stop("`data` must have length n_embd * (il_end - il_start + 1) = ",
+                 expected, ", got ", length(data), call. = FALSE)
+        }
+        data <- as.double(data)
+    }
+
+    .Call("r_llama_apply_adapter_cvec", ctx, data, n_embd, il_start, il_end)
+    invisible(NULL)
+}
+
 # ============================================================
 # Model metadata (individual access)
 # ============================================================
@@ -1155,6 +1902,92 @@ llama_vocab_get_text <- function(model, token) {
 #' @export
 llama_vocab_get_score <- function(model, token) {
     .Call("r_llama_vocab_get_score", model, as.integer(token))
+}
+
+#' Get the attribute flags of a token
+#'
+#' Token attributes are stored as a bit mask in the GGUF vocabulary. This
+#' returns the set flags by name, which is easier to work with from R than the
+#' raw integer.
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @param token Integer token ID (0-based)
+#' @return A character vector of the flags that are set, drawn from
+#'   `"unknown"`, `"unused"`, `"normal"`, `"control"`, `"user_defined"`,
+#'   `"byte"`, `"normalized"`, `"lstrip"`, `"rstrip"`, `"single_word"`.
+#'   A zero-length vector means the token has no attributes defined.
+#' @export
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' llama_vocab_get_attr(model, 0L)   # e.g. "control"
+#' }
+llama_vocab_get_attr <- function(model, token) {
+    .Call("r_llama_vocab_get_attr", model, as.integer(token))
+}
+
+#' Tokenizer BOS / EOS / SEP insertion defaults
+#'
+#' Report whether the model's tokenizer is configured to add a
+#' beginning-of-sequence, end-of-sequence, or separator token automatically.
+#' These are the defaults [llama_tokenize] follows when `add_special = TRUE`.
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @return A logical scalar.
+#' @name llama_vocab_add_special
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' llama_vocab_get_add_bos(model)
+#' }
+NULL
+
+#' @rdname llama_vocab_add_special
+#' @export
+llama_vocab_get_add_bos <- function(model) {
+    .Call("r_llama_vocab_get_add_bos", model)
+}
+
+#' @rdname llama_vocab_add_special
+#' @export
+llama_vocab_get_add_eos <- function(model) {
+    .Call("r_llama_vocab_get_add_eos", model)
+}
+
+#' @rdname llama_vocab_add_special
+#' @export
+llama_vocab_get_add_sep <- function(model) {
+    .Call("r_llama_vocab_get_add_sep", model)
+}
+
+#' Additional special token IDs
+#'
+#' `llama_vocab_mask()` returns the mask token (used by encoder models such as
+#' BERT); `llama_vocab_fim_pad()` returns the fill-in-the-middle padding token
+#' (used by code models). Both complement the ids already reported by
+#' [llama_vocab_info].
+#'
+#' @param model Model handle returned by [llama_load_model]
+#' @return An integer token ID, or `NA_integer_` when the vocabulary does not
+#'   define the token.
+#' @name llama_vocab_special_tokens
+#' @examples
+#' \dontrun{
+#' model <- llama_load_model("model.gguf")
+#' llama_vocab_fim_pad(model)
+#' }
+NULL
+
+#' @rdname llama_vocab_special_tokens
+#' @export
+llama_vocab_mask <- function(model) {
+    .Call("r_llama_vocab_mask", model)
+}
+
+#' @rdname llama_vocab_special_tokens
+#' @export
+llama_vocab_fim_pad <- function(model) {
+    .Call("r_llama_vocab_fim_pad", model)
 }
 
 # ============================================================
@@ -1306,6 +2139,65 @@ llama_n_ubatch <- function(ctx) {
 #' @export
 llama_n_seq_max <- function(ctx) {
     .Call("r_llama_n_seq_max", ctx)
+}
+
+#' Name of a flash-attention type
+#'
+#' llama.cpp's own name for one of the values [llama_new_context] accepts for
+#' \code{flash_attn}. Note that these are the library's names, not the R
+#' argument's: \code{"on"} is called \code{"enabled"} and \code{"off"} is called
+#' \code{"disabled"}.
+#'
+#' This translates a request, not an outcome --- to find out what a context
+#' actually settled on after asking for \code{"auto"}, use
+#' [llama_context_flash_attn].
+#'
+#' @param type One of \code{"auto"}, \code{"on"} or \code{"off"}, as passed to
+#'   [llama_new_context].
+#' @return A character scalar with llama.cpp's name for that type.
+#' @seealso [llama_context_flash_attn], [llama_new_context]
+#' @export
+#' @examples
+#' llama_flash_attn_type_name("auto")  # "auto"
+#' llama_flash_attn_type_name("on")    # "enabled"
+llama_flash_attn_type_name <- function(type) {
+    stopifnot(is.character(type), length(type) == 1)
+    type_int <- switch(type,
+        "auto" = -1L,
+        "on"   =  1L,
+        "off"  =  0L,
+        stop("type must be 'auto', 'on', or 'off'"))
+    .Call("r_llama_flash_attn_type_name", type_int)
+}
+
+#' Flash attention a context actually uses
+#'
+#' Reports whether flash attention ended up enabled for a context, which is the
+#' question [llama_new_context]'s \code{flash_attn = "auto"} leaves open: the
+#' decision is llama.cpp's, and depends on the model and backend.
+#'
+#' Whether the request was \code{"auto"} cannot be recovered from a live
+#' context: llama.cpp resolves it while the context is being built and does not
+#' keep the original request.
+#'
+#' @param ctx Context handle returned by [llama_new_context]
+#' @return A named list:
+#'   \itemize{
+#'     \item \code{enabled}: logical, whether flash attention is in use
+#'     \item \code{type_name}: llama.cpp's name for the resolved state,
+#'       \code{"enabled"} or \code{"disabled"}
+#'   }
+#' @seealso [llama_flash_attn_type_name], [llama_new_context]
+#' @export
+#' @examples
+#' \dontrun{
+#' ctx <- llama_new_context(model, flash_attn = "auto")
+#' if (llama_context_flash_attn(ctx)$enabled) {
+#'     message("llama.cpp enabled flash attention for this model")
+#' }
+#' }
+llama_context_flash_attn <- function(ctx) {
+    .Call("r_llama_context_flash_attn", ctx)
 }
 
 #' Get number of threads for single-token generation
@@ -1549,6 +2441,157 @@ llama_state_get_size <- function(ctx) {
     .Call("r_llama_state_get_size", ctx)
 }
 
+#' Copy the context state to and from raw bytes
+#'
+#' `llama_state_get_data()` serializes the whole context state (KV cache,
+#' logits, embeddings) into a raw vector; `llama_state_set_data()` restores it.
+#' This is the in-memory counterpart of [llama_state_save] /
+#' [llama_state_load], useful for snapshotting a context without touching disk.
+#'
+#' The bytes are only meaningful to a context created from the same model with
+#' the same parameters. Restoring a snapshot into a mismatched context errors.
+#'
+#' @param ctx Context handle returned by [llama_new_context]
+#' @param data A raw vector previously returned by `llama_state_get_data()`.
+#' @return `llama_state_get_data()`: a raw vector.
+#'   `llama_state_set_data()`: the number of bytes read, invisibly.
+#' @name llama_state_data
+#' @seealso [llama_state_save], [llama_state_get_size]
+#' @examples
+#' \dontrun{
+#' ctx <- llama_new_context(model)
+#' llama_generate(ctx, "The capital of France is", max_new_tokens = 8L)
+#'
+#' snapshot <- llama_state_get_data(ctx)   # remember where we are
+#' llama_generate(ctx, "Something else", max_new_tokens = 8L)
+#' llama_state_set_data(ctx, snapshot)     # and go back
+#' }
+NULL
+
+#' @rdname llama_state_data
+#' @export
+llama_state_get_data <- function(ctx) {
+    .Call("r_llama_state_get_data", ctx)
+}
+
+#' @rdname llama_state_data
+#' @export
+llama_state_set_data <- function(ctx, data) {
+    stopifnot(is.raw(data))
+    invisible(.Call("r_llama_state_set_data", ctx, data))
+}
+
+# Flag words accepted by the per-sequence state functions. Kept internal: the
+# R API takes them as booleans rather than exposing a bit mask.
+.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY <- 1L
+.LLAMA_STATE_SEQ_FLAGS_ON_DEVICE    <- 2L
+
+.state_seq_flags <- function(partial_only = FALSE, on_device = FALSE) {
+    flags <- 0L
+    if (isTRUE(partial_only)) flags <- bitwOr(flags, .LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY)
+    if (isTRUE(on_device))    flags <- bitwOr(flags, .LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)
+    flags
+}
+
+#' Save and restore the state of a single sequence
+#'
+#' Where [llama_state_get_data] snapshots the entire context, these work on one
+#' sequence at a time. That makes it possible to checkpoint a single
+#' conversation in a multi-sequence context, or to cache the KV state of a long
+#' shared prefix and restore it into a fresh sequence instead of recomputing it.
+#'
+#' `partial_only = TRUE` restricts the copy to partial state — the SWA window of
+#' a sliding-window model, or the recurrent state of a Mamba-style model. Leave
+#' it `FALSE` for ordinary transformers.
+#'
+#' @param ctx Context handle returned by [llama_new_context]
+#' @param seq_id Sequence ID (0-based), below `llama_n_seq_max(ctx)`.
+#' @param data A raw vector previously returned by `llama_state_seq_get_data()`.
+#' @param partial_only Copy only partial state (SWA window / recurrent state).
+#' @param on_device Keep the copy in device memory where the backend supports it.
+#' @return `llama_state_seq_get_size()`: size in bytes.
+#'   `llama_state_seq_get_data()`: a raw vector.
+#'   `llama_state_seq_set_data()`: bytes read, invisibly.
+#' @name llama_state_seq
+#' @seealso [llama_state_seq_save_file], [llama_state_data], [llama_memory_seq_cp]
+#' @examples
+#' \dontrun{
+#' ctx <- llama_new_context(model, n_seq_max = 4L)
+#'
+#' # Cache the KV state of a shared prefix, then reuse it for another sequence
+#' prefix <- llama_state_seq_get_data(ctx, seq_id = 0L)
+#' llama_state_seq_set_data(ctx, prefix, seq_id = 1L)
+#' }
+NULL
+
+#' @rdname llama_state_seq
+#' @export
+llama_state_seq_get_size <- function(ctx, seq_id, partial_only = FALSE, on_device = FALSE) {
+    .Call("r_llama_state_seq_get_size", ctx, as.integer(seq_id),
+          .state_seq_flags(partial_only, on_device))
+}
+
+#' @rdname llama_state_seq
+#' @export
+llama_state_seq_get_data <- function(ctx, seq_id, partial_only = FALSE, on_device = FALSE) {
+    .Call("r_llama_state_seq_get_data", ctx, as.integer(seq_id),
+          .state_seq_flags(partial_only, on_device))
+}
+
+#' @rdname llama_state_seq
+#' @export
+llama_state_seq_set_data <- function(ctx, data, seq_id, partial_only = FALSE, on_device = FALSE) {
+    stopifnot(is.raw(data))
+    invisible(.Call("r_llama_state_seq_set_data", ctx, data, as.integer(seq_id),
+                    .state_seq_flags(partial_only, on_device)))
+}
+
+#' Save and load the state of a single sequence to a file
+#'
+#' The file-backed counterpart of [llama_state_seq_get_data]. The token list
+#' that produced the state is stored alongside it, so a reloaded sequence can
+#' report which prompt it came from.
+#'
+#' @param ctx Context handle returned by [llama_new_context]
+#' @param path Path to the session file.
+#' @param seq_id Sequence ID (0-based).
+#' @param tokens Integer vector of the tokens that produced this state, or
+#'   `NULL` to store none.
+#' @param n_token_capacity Maximum number of tokens to read back. Must be at
+#'   least as large as the count that was saved.
+#' @return `llama_state_seq_save_file()`: bytes written, invisibly.
+#'   `llama_state_seq_load_file()`: a list with `n_bytes` and the `tokens` that
+#'   were stored with the state.
+#' @name llama_state_seq_file
+#' @seealso [llama_state_seq], [llama_state_save]
+#' @examples
+#' \dontrun{
+#' toks <- llama_tokenize(ctx, "A long shared prefix")
+#' llama_state_seq_save_file(ctx, "prefix.bin", seq_id = 0L, tokens = toks)
+#'
+#' ctx2 <- llama_new_context(model)
+#' res  <- llama_state_seq_load_file(ctx2, "prefix.bin", seq_id = 0L)
+#' identical(res$tokens, toks)
+#' }
+NULL
+
+#' @rdname llama_state_seq_file
+#' @export
+llama_state_seq_save_file <- function(ctx, path, seq_id, tokens = NULL) {
+    stopifnot(is.character(path), length(path) == 1)
+    if (!is.null(tokens)) tokens <- as.integer(tokens)
+    invisible(.Call("r_llama_state_seq_save_file", ctx, path, as.integer(seq_id), tokens))
+}
+
+#' @rdname llama_state_seq_file
+#' @export
+llama_state_seq_load_file <- function(ctx, path, seq_id, n_token_capacity = 65536L) {
+    stopifnot(is.character(path), length(path) == 1)
+    if (!file.exists(path)) stop("llamaR: state file does not exist: ", path)
+    .Call("r_llama_state_seq_load_file", ctx, path, as.integer(seq_id),
+          as.integer(n_token_capacity))
+}
+
 #' Synchronize asynchronous computation
 #'
 #' Blocks until all pending GPU/async operations for this context are complete.
@@ -1664,6 +2707,56 @@ llama_perf_print <- function(ctx) {
     invisible(NULL)
 }
 
+#' Sampler performance statistics
+#'
+#' Timing for the sampling step alone, as opposed to the decode timings
+#' reported by [llama_perf]. Together they show how generation time splits
+#' between the model and the sampler chain — useful when an expensive sampler
+#' such as a grammar is in play.
+#'
+#' These take a streaming generation state rather than a context, because the
+#' sampler chain only outlives a single call on the streaming path: a one-shot
+#' [llama_generate] builds its chain and frees it before returning.
+#'
+#' @param state Generation state returned by [llama_gen_begin] or
+#'   [llama_gen_begin_at].
+#' @return `llama_perf_sampler()`: a named list with `t_sample_ms` (sampling
+#'   time in milliseconds) and `n_sample` (number of tokens sampled).
+#'   The other two return `NULL` invisibly.
+#' @name llama_perf_sampler
+#' @seealso [llama_perf], [llama_gen_begin]
+#' @examples
+#' \dontrun{
+#' st <- llama_gen_begin(ctx, "Hello", max_new_tokens = 64L)
+#' repeat {
+#'   chunk <- llama_gen_next(st)
+#'   if (is.null(chunk)) break
+#' }
+#' p <- llama_perf_sampler(st)
+#' cat("Sampling:", p$t_sample_ms, "ms for", p$n_sample, "tokens\n")
+#' }
+NULL
+
+#' @rdname llama_perf_sampler
+#' @export
+llama_perf_sampler <- function(state) {
+    .Call("r_llama_perf_sampler", state)
+}
+
+#' @rdname llama_perf_sampler
+#' @export
+llama_perf_sampler_print <- function(state) {
+    .Call("r_llama_perf_sampler_print", state)
+    invisible(NULL)
+}
+
+#' @rdname llama_perf_sampler
+#' @export
+llama_perf_sampler_reset <- function(state) {
+    .Call("r_llama_perf_sampler_reset", state)
+    invisible(NULL)
+}
+
 #' Print memory breakdown by device
 #'
 #' Prints a debug summary of how model weights are distributed across compute
@@ -1739,6 +2832,34 @@ llama_supports_rpc <- function() {
 #' cat("Max devices:", n, "\n")
 llama_max_devices <- function() {
     .Call("r_llama_max_devices")
+}
+
+#' Get the maximum number of parallel sequences
+#'
+#' The compile-time ceiling on `n_seq_max` in [llama_new_context]. Requesting
+#' more parallel sequences than this fails regardless of available memory.
+#'
+#' @return An integer scalar.
+#' @seealso [llama_new_context], [llama_n_seq_max]
+#' @export
+#' @examples
+#' # Upper bound on parallel sequences for this build
+#' llama_max_parallel_sequences()
+llama_max_parallel_sequences <- function() {
+    .Call("r_llama_max_parallel_sequences")
+}
+
+#' Get the maximum number of tensor buffer-type overrides
+#'
+#' The size a tensor buffer-type override buffer must have. Reported for
+#' completeness; llamaR does not currently expose per-tensor overrides.
+#'
+#' @return An integer scalar.
+#' @export
+#' @examples
+#' llama_max_tensor_buft_overrides()
+llama_max_tensor_buft_overrides <- function() {
+    .Call("r_llama_max_tensor_buft_overrides")
 }
 
 # ============================================================

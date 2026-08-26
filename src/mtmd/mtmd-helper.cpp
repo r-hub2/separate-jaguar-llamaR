@@ -12,7 +12,9 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cinttypes>
+#include <cstring>
 #include <vector>
 
 #include <R_ext/Print.h>   // REprintf — keep logging off stderr (CRAN-safe)

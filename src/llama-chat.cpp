@@ -4,6 +4,7 @@
 
 #include <map>
 #include <sstream>
+#include <stdexcept>
 #include <algorithm>
 
 #if __cplusplus >= 202000L

@@ -5,7 +5,9 @@
 #include "llama-kv-cells.h"
 #include "llama-memory.h"
 
+#include <cassert>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct llama_cparams;

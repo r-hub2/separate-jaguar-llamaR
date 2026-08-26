@@ -10,6 +10,7 @@
 
 #ifdef __cplusplus
 #include <string>
+#include <utility>
 #include <vector>
 #include <cinttypes>
 #include <memory>

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Multi-GPU: Splits, Replicas and Benchmarking</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Multi-GPU: Splits, Replicas and
+Benchmarking</h1>
+
+
+
+<p>You have more than one GPU. The intuition is that splitting a model
+across all of them makes it faster. <strong>For inference, that
+intuition is wrong</strong>, and this vignette explains what to do
+instead.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(llamaR)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">llama_backend_devices</span>()   <span class="co"># &quot;Vulkan0&quot;, &quot;Vulkan1&quot;, ...</span></span></code></pre></div>
+<div id="the-one-rule-that-matters" class="section level2">
+<h2>1. The one rule that matters</h2>
+<blockquote>
+<p>If the model <strong>fits in one GPU</strong>, run independent
+replicas — one per GPU. Split the model <strong>only</strong> when it
+does not fit.</p>
+</blockquote>
+<p>Splitting a model does not divide the work; it <em>serializes</em>
+it. Each layer’s output must reach the next layer, which lives on
+another card, so every token pays for cross-device transfers. On the
+Vulkan backend those transfers go through host RAM at roughly 1 GB/s.
+Meanwhile the GPUs mostly wait for each other: a 4-way split does not
+run four times faster, it runs <em>slower than one card</em>.</p>
+<p>Measured on 4× Tesla P100 and 4× V100 (Qwen2.5-1.5B-Instruct Q4_K_M,
+decode throughput, median of three 128-token runs):</p>
+<table>
+<thead>
+<tr class="header">
+<th>Strategy</th>
+<th>GPUs</th>
+<th><code>split_mode</code></th>
+<th align="right">P100 t/s</th>
+<th align="right">V100 t/s</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Baseline</td>
+<td>1</td>
+<td><code>none</code></td>
+<td align="right">419.7</td>
+<td align="right">516.9</td>
+</tr>
+<tr class="even">
+<td>Pipeline (PP)</td>
+<td>2</td>
+<td><code>layer</code></td>
+<td align="right">150.4</td>
+<td align="right">221.5</td>
+</tr>
+<tr class="odd">
+<td>Tensor (TP)</td>
+<td>2</td>
+<td><code>row</code></td>
+<td align="right">150.4</td>
+<td align="right">223.2</td>
+</tr>
+<tr class="even">
+<td>Pipeline (PP)</td>
+<td>4</td>
+<td><code>layer</code></td>
+<td align="right">133.3</td>
+<td align="right">176.3</td>
+</tr>
+<tr class="odd">
+<td>Tensor (TP)</td>
+<td>4</td>
+<td><code>row</code></td>
+<td align="right">130.0</td>
+<td align="right">176.6</td>
+</tr>
+<tr class="even">
+<td>TP=2 × DP=2</td>
+<td>4</td>
+<td><code>row</code> + 2 replicas</td>
+<td align="right">306</td>
+<td align="right">446</td>
+</tr>
+<tr class="odd">
+<td><strong>DP=4</strong></td>
+<td>4</td>
+<td>4 replicas</td>
+<td align="right"><strong>975</strong></td>
+<td align="right"><strong>1300</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Read the first and last rows together. One GPU does 419.7 t/s. Four
+GPUs <em>split</em> do 130 — worse than one. Four GPUs running
+<em>independent replicas</em> do 975. The split is not a speed-up
+mechanism; it is a way to fit a model that otherwise would not load.</p>
+</div>
+<div id="data-parallelism-replicas" class="section level2">
+<h2>2. Data parallelism: replicas</h2>
+<p>DP is not an argument to <code>llama_load_model()</code>. It is
+<strong>separate processes</strong>, each with its own model and
+context, each pinned to its own GPU. Throughput is the sum of what the
+replicas deliver.</p>
+<p>Pin one replica to one card with <code>devices</code> and turn
+splitting off:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(<span class="st">&quot;model.gguf&quot;</span>, <span class="at">n_gpu_layers =</span> <span class="sc">-</span><span class="dv">1</span><span class="dt">L</span>,</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>                          <span class="at">devices =</span> <span class="st">&quot;Vulkan0&quot;</span>, <span class="at">split_mode =</span> <span class="st">&quot;none&quot;</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>ctx <span class="ot">&lt;-</span> <span class="fu">llama_new_context</span>(model, <span class="at">n_ctx =</span> <span class="dv">2048</span><span class="dt">L</span>)</span></code></pre></div>
+<p>Run several such processes concurrently — one per GPU. They share
+nothing, so there is no cross-device traffic at all. That is precisely
+why DP wins.</p>
+<p>Separate <em>processes</em>, not threads: Vulkan and ggml keep
+per-process singleton state, so two replicas inside one R session would
+fight over it.</p>
+</div>
+<div id="when-the-model-does-not-fit-layer-vs-row" class="section level2">
+<h2>3. When the model does not fit: <code>layer</code> vs
+<code>row</code></h2>
+<p>Now the split is not a choice but a necessity — a 30B+ model will not
+load on a 16 GB card. Two strategies, and the difference is how much
+data crosses between devices:</p>
+<ul>
+<li><code>split_mode = &quot;layer&quot;</code> (<strong>pipeline</strong>):
+layers 1–16 on GPU 0, 17–32 on GPU 1. One activation handoff per forward
+pass.</li>
+<li><code>split_mode = &quot;row&quot;</code> (<strong>tensor</strong>): every
+weight matrix is cut by rows across the cards. An all-reduce after
+<em>every</em> layer.</li>
+</ul>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="co"># Pipeline: fewest cross-device copies</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(<span class="st">&quot;big-model.gguf&quot;</span>, <span class="at">n_gpu_layers =</span> <span class="sc">-</span><span class="dv">1</span><span class="dt">L</span>,</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>                          <span class="at">devices =</span> <span class="fu">c</span>(<span class="st">&quot;Vulkan0&quot;</span>, <span class="st">&quot;Vulkan1&quot;</span>),</span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>                          <span class="at">split_mode =</span> <span class="st">&quot;layer&quot;</span>)</span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a><span class="co"># Tensor: more parallelism per token, far more traffic</span></span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(<span class="st">&quot;big-model.gguf&quot;</span>, <span class="at">n_gpu_layers =</span> <span class="sc">-</span><span class="dv">1</span><span class="dt">L</span>,</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a>                          <span class="at">devices =</span> <span class="fu">c</span>(<span class="st">&quot;Vulkan0&quot;</span>, <span class="st">&quot;Vulkan1&quot;</span>),</span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a>                          <span class="at">split_mode =</span> <span class="st">&quot;row&quot;</span>)</span></code></pre></div>
+<p>The benchmark above shows them within noise of each other on 2 GPUs.
+On a slow interconnect prefer <code>layer</code>: it pays the transfer
+once per pass instead of once per layer. Use <code>row</code> when the
+interconnect is fast, or when a single layer is itself too large for one
+card.</p>
+<p>Note the default is <code>split_mode = &quot;layer&quot;</code>, so on a
+multi-GPU host a model gets split <strong>whether or not you
+asked</strong>. If it fits in one card, say so explicitly:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>model <span class="ot">&lt;-</span> <span class="fu">llama_load_model</span>(<span class="st">&quot;model.gguf&quot;</span>, <span class="at">devices =</span> <span class="st">&quot;Vulkan0&quot;</span>, <span class="at">split_mode =</span> <span class="st">&quot;none&quot;</span>)</span></code></pre></div>
+<p>On the Vulkan backend the default split can hang. Pinning to one GPU
+is both faster and safer when the model fits.</p>
+</div>
+<div id="the-hybrid-tp-dp" class="section level2">
+<h2>4. The hybrid: TP × DP</h2>
+<p>With four GPUs you can run two <code>row</code>-split replicas — GPUs
+{0,1} and {2,3} — concurrently. Each replica splits a model too big for
+one card; the two replicas never talk to each other.</p>
+<p>This is the mode to reach for when the model needs two cards and you
+have four. It is worth 306 t/s on the P100 host against 130 for a plain
+4-way split — but still far below 975 for four independent replicas,
+which the model was simply too large to allow.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="co"># Replica A, in its own process:</span></span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a><span class="fu">llama_load_model</span>(<span class="st">&quot;big.gguf&quot;</span>, <span class="at">devices =</span> <span class="fu">c</span>(<span class="st">&quot;Vulkan0&quot;</span>, <span class="st">&quot;Vulkan1&quot;</span>), <span class="at">split_mode =</span> <span class="st">&quot;row&quot;</span>)</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a><span class="co"># Replica B, in another process:</span></span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a><span class="fu">llama_load_model</span>(<span class="st">&quot;big.gguf&quot;</span>, <span class="at">devices =</span> <span class="fu">c</span>(<span class="st">&quot;Vulkan2&quot;</span>, <span class="st">&quot;Vulkan3&quot;</span>), <span class="at">split_mode =</span> <span class="st">&quot;row&quot;</span>)</span></code></pre></div>
+</div>
+<div id="measuring-it-yourself" class="section level2">
+<h2>5. Measuring it yourself</h2>
+<p>Do not trust the tables above for <em>your</em> model and
+<em>your</em> hardware. llamaR ships the benchmark that produced
+them:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a><span class="fu">system.file</span>(<span class="st">&quot;examples&quot;</span>, <span class="st">&quot;bench_pp_tp_dp.sh&quot;</span>, <span class="at">package =</span> <span class="st">&quot;llamaR&quot;</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="co"># auto-detects GPU count; TP_SIZE=2 for the TPxDP row</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a><span class="fu">bash</span> bench_pp_tp_dp.sh model.gguf</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="co"># 8 GPUs as TP=4 x DP=2, 128 tokens per rep, 3 reps</span></span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a><span class="fu">bash</span> bench_pp_tp_dp.sh model.gguf 8 4 128 3</span></code></pre></div>
+<p>It sweeps baseline, PP and TP at 2, 4, … GPUs, then TP×DP, then pure
+DP — launching the DP replicas <strong>concurrently</strong> in
+background processes, because that is the only way a DP number means
+anything. Each config runs in its own process
+(<code>bench_replica.R</code>), which prints one parseable line:</p>
+<pre><code>RESULT dp0 devices=Vulkan0 split=none decode_tps=419.7 prefill_ms=31.2 total_ms=305.1</code></pre>
+<p>For DP rows, throughput is the <strong>sum</strong> of the concurrent
+replicas’ <code>decode_tps</code>; single-context rows are read
+directly.</p>
+<p>If you are on a multi-GPU host, build ggmlR with
+<code>--enable-hard-exit</code>. Without it each of the benchmark’s
+processes may segfault at exit — after printing its results, so the
+numbers survive, but the sweep output becomes noisy. See
+<code>vignette(&quot;multi-gpu&quot;, package = &quot;ggmlR&quot;)</code>.</p>
+</div>
+<div id="serving" class="section level2">
+<h2>6. Serving</h2>
+<p><code>llama_serve_anthropic()</code> takes the same
+<code>split_mode</code>, and the same rule applies — pin to one GPU
+unless the model does not fit:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="fu">llama_serve_anthropic</span>(<span class="st">&quot;model.gguf&quot;</span>, <span class="at">port =</span> <span class="dv">11435</span><span class="dt">L</span>, <span class="at">split_mode =</span> <span class="st">&quot;none&quot;</span>)</span></code></pre></div>
+<p>For a model that needs several cards:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="fu">llama_serve_anthropic</span>(<span class="st">&quot;big-model.gguf&quot;</span>, <span class="at">port =</span> <span class="dv">11435</span><span class="dt">L</span>, <span class="at">split_mode =</span> <span class="st">&quot;row&quot;</span>)</span></code></pre></div>
+<p>The server reports the model it loaded at <code>/v1/models</code>;
+<code>model_id</code> overrides the name it advertises (it defaults to
+the GGUF’s file name). Serving several replicas means several servers on
+different ports, with a load balancer in front — the server process
+itself holds exactly one model.</p>
+</div>
+<div id="summary" class="section level2">
+<h2>7. Summary</h2>
+<p>Splitting is for <strong>fitting</strong>, replicas are for
+<strong>throughput</strong>. Reach for <code>split_mode</code> only when
+<code>llama_load_model()</code> on a single card runs out of VRAM,
+prefer <code>&quot;layer&quot;</code> over <code>&quot;row&quot;</code> on a slow
+interconnect, and always measure with <code>bench_pp_tp_dp.sh</code>
+before believing any of it.</p>
+<p>See also <code>vignette(&quot;getting-started&quot;)</code>, and
+<code>vignette(&quot;multi-gpu&quot;, package = &quot;ggmlR&quot;)</code> for the
+tensor-level primitives underneath.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

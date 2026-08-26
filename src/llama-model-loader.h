@@ -11,9 +11,12 @@
 
 #include <cstddef>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 using llama_buf_map = std::unordered_map<uint32_t, ggml_backend_buffer_t>;
 

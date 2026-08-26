@@ -13,12 +13,16 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <forward_list>
+#include <functional>
 #include <limits>
 #include <map>
 #include <queue>
 #include <set>
+#include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 //

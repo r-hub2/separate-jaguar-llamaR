@@ -13,6 +13,7 @@ llama_serve_openai(
   host = "127.0.0.1",
   template = NULL,
   max_tokens = 512L,
+  strip_thinking = TRUE,
   ...
 )
 }
@@ -35,6 +36,11 @@ responses. Defaults to the model file's base name.}
 built-in template.}
 
 \item{max_tokens}{Default \code{max_new_tokens} when a request omits it.}
+
+\item{strip_thinking}{Drop \code{<think>...</think>} reasoning from the
+answer, so a thinking model returns its conclusion rather than its
+monologue. \code{TRUE} by default, since OpenAI clients expect the reply
+itself; set \code{FALSE} to pass the reasoning through untouched.}
 
 \item{...}{Reserved for future options.}
 }

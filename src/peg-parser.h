@@ -2,11 +2,13 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <initializer_list>
 #include <memory>
 #include <unordered_map>
 #include <string>
 #include <string_view>
 #include <functional>
+#include <utility>
 #include <vector>
 #include <variant>
 

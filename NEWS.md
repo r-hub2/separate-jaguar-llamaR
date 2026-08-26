@@ -1,3 +1,10 @@
+# llamaR 0.2.6
+
+* Context and per-sequence state snapshots (`llama_state_get_data`, `llama_state_seq_get_data`/`_set_data`, `llama_state_seq_save_file`/`_load_file`) — checkpoint a conversation, or cache a shared prefix instead of recomputing it.
+* New introspection and steering bindings: extra `llama_model_info()` fields, `llama_vocab_get_attr()` and friends, `llama_lora_meta()`, `llama_apply_control_vector()`, `llama_perf_sampler()`.
+
+---
+
 # llamaR 0.2.5
 
 * Engine updated to upstream llama.cpp (expanded architectures, incl. Qwen3.5).

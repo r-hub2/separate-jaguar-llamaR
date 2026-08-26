@@ -2,6 +2,7 @@
 #include "common.h"
 #include <functional>
 #include <optional>
+#include <stdexcept>
 
 common_regex::common_regex(const std::string & pattern) :
     pattern(pattern),

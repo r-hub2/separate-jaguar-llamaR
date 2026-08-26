@@ -16,6 +16,7 @@ The package supports GPU acceleration via Vulkan, and automatically falls back t
 - Tool-aware chat layer (`llama_chat_build`, `llama_chat_parse`) — apply a model's template with tool definitions and parse tool calls back out, with lazy-grammar constraining
 - Multimodal (vision) inference (`llama_mtmd_load`, `llama_image_load`, `llama_image_eval`) — vision/OCR models via an mmproj projector
 - Embedding extraction: single (`llama_embeddings`), batch (`llama_embed_batch`), ragnar-compatible (`embed_llamar`)
+- Context and per-sequence state snapshots (`llama_state_get_data`, `llama_state_seq_get_data`) — checkpoint a conversation, or cache a shared prefix and restore it instead of recomputing it
 - Hugging Face integration: download and cache models (`llama_hf_download`, `llama_load_model_hf`, etc.)
 - Encoder-decoder model support (T5, BART) via `llama_encode`
 - Explicit backend/device selection and multi-GPU split (`llama_load_model(devices = ...)`)
@@ -48,6 +49,41 @@ Measured on AMD Ryzen 5 5600 + AMD RX 9070, model Ministral-3-3B-Instruct-2512-Q
 |---|---:|---:|
 | CPU (8 threads) | 8.5 | 1.0x |
 | GPU (Vulkan) | 108.0 | 12.7x |
+
+### Multi-GPU: single-GPU vs split vs data-parallel
+
+`llama_load_model()` exposes llama.cpp's split strategies via `split_mode` (`"none"`, `"layer"`, `"row"`) and `devices`. Measured on two 4-GPU hosts (Vulkan), Qwen2.5-1.5B-Instruct Q4_K_M, decode throughput, median of 3 runs of 128 tokens:
+
+- **P100** — 4× Tesla P100-SXM2-16GB
+- **V100** — 4× Tesla V100-32GB, 2× Xeon E5-2698 v4, 256 GB RAM
+
+| Strategy | GPUs | `split_mode` | Decode t/s (P100) | Decode t/s (V100) | Notes |
+|---|---|---|---:|---:|---|
+| Baseline | 1 | `none` | **419.7** | **516.9** | model fits in one card — fastest |
+| Pipeline (PP) | 2 | `layer` | 150.4 | 221.5 | layers spread across 2 GPUs |
+| Tensor (TP) | 2 | `row` | 150.4 | 223.2 | rows split, all-reduce per layer |
+| Pipeline (PP) | 4 | `layer` | 133.3 | 176.3 | more hops → slower |
+| Tensor (TP) | 4 | `row` | 130.0 | 176.6 | more hops → slower |
+| **TP=2 × DP=2** | 4 | `row` + 2 replicas | **306** | **446** | two `row`-split replicas on {0,1} and {2,3}, run concurrently |
+| **DP=4** | 4 | 4 replicas | **975** | **1300** | four single-GPU replicas, run concurrently |
+
+Same model on an **8× Tesla V100-32GB** host (2× Xeon E5-2698 v4, 256 GB RAM), showing the pattern holds as GPU count doubles:
+
+| Strategy | GPUs | `split_mode` | Decode t/s | Notes |
+|---|---|---|---:|---|
+| Baseline | 1 | `none` | **684.9** | model fits in one card — fastest |
+| Pipeline (PP) | 2 | `layer` | 229.7 | layers spread across 2 GPUs |
+| Tensor (TP) | 2 | `row` | 231.3 | rows split, all-reduce per layer |
+| Pipeline (PP) | 4 | `layer` | 187.5 | more hops → slower |
+| Tensor (TP) | 4 | `row` | 191.0 | more hops → slower |
+| Pipeline (PP) | 8 | `layer` | 142.8 | 8-way split — slowest single-context |
+| Tensor (TP) | 8 | `row` | 137.1 | per-layer all-reduce across 8 cards |
+| **TP=2 × DP=4** | 8 | `row` + 4 replicas | **897** | four `row`-split replicas, run concurrently |
+| **DP=8** | 8 | 8 replicas | **2290** | eight single-GPU replicas, run concurrently |
+
+Data parallelism (DP) means running **independent processes**, each with its own model/context on its own GPU(s); throughput is the sum of the concurrent replicas' t/s. Reproduce with `inst/examples/bench_pp_tp_dp.sh <model.gguf>`.
+
+**Rule of thumb:** if the model **fits in one GPU**, use single-GPU replicas (DP) for throughput — DP=4 here is ~2.3× a single card and far ahead of any split. Reach for `split_mode = "layer"`/`"row"` only when the model is **too large for one card** (e.g. a 30B+ model on 16 GB GPUs): a split is then the only way to load it. `"layer"` minimizes cross-device copies (one activation handoff per pass); `"row"` maximizes per-token parallelism but pays a per-layer all-reduce over the ~1 GB/s host-staging link.
 
 ## Installation
 
@@ -163,17 +199,37 @@ hf download unsloth/Qwen3.5-9B-GGUF \
 Rscript -e "llamaR::llama_serve_anthropic('/home/user/llm_models/Qwen3.5-9B-UD-Q6_K_XL.gguf', port=11435L)"
 ```
 
-Then, in another shell, point Claude Code at it and launch:
+Then, in another shell, point Claude Code at it and launch. Rather than typing
+the model name — which silently goes stale the moment you serve a different
+GGUF — read it back from the server's `/v1/models` endpoint:
 
 ```bash
 unset ANTHROPIC_API_KEY
 export ANTHROPIC_BASE_URL=http://127.0.0.1:11435
 export ANTHROPIC_AUTH_TOKEN=sk-local
 export CLAUDE_CODE_SKIP_PREFLIGHT_CHECK=1
-export ANTHROPIC_MODEL=Qwen3.5-9B-UD-Q6_K_XL
-export ANTHROPIC_SMALL_FAST_MODEL=Qwen3.5-9B-UD-Q6_K_XL
-claude
+
+# Ask the server which model it actually loaded (sed, so no jq dependency).
+MODEL=$(curl -sS --fail --max-time 5 "$ANTHROPIC_BASE_URL/v1/models" \
+        | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1)
+
+# Guard: with an empty ANTHROPIC_MODEL, Claude Code quietly falls back to the
+# billed cloud model instead of your local server.
+if [ -z "$MODEL" ]; then
+  echo "Server $ANTHROPIC_BASE_URL is not up yet (a large GGUF takes minutes to load)." >&2
+else
+  export ANTHROPIC_MODEL="$MODEL"
+  # Used for cheap side-tasks (session titles); the server holds one model only.
+  export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
+  echo "Model from server: $MODEL"
+  claude
+fi
 ```
+
+Claude Code never queries the server for the model name on its own — it sends
+whatever `ANTHROPIC_MODEL` holds, and the banner shows that value. The server
+ignores the incoming `model` field and always answers with the GGUF it loaded,
+so the substitution above exists to keep the *client's* view honest.
 
 Or use the bundled launcher, which starts the server, waits for it, and runs
 Claude Code in one step:
@@ -285,6 +341,22 @@ cat("Model:", info$desc, "\n")
 cat("Layers:", info$n_layer, "\n")
 cat("Context:", info$n_ctx_train, "\n")
 cat("Embedding size:", info$n_embd, "\n")
+
+# Architecture details
+cat("RoPE:", info$rope_type, "\n")
+cat("SWA window:", info$n_swa, "\n")   # 0 = full-context attention
+cat("Hybrid:", info$is_hybrid, "\n")   # attention + recurrent layers
+
+# Sampling parameters the model author recommends, when the GGUF records them
+str(llama_model_sampling_meta(model))
+```
+
+Vocabulary details:
+
+```r
+llama_vocab_get_add_bos(model)      # does the tokenizer prepend BOS?
+llama_vocab_get_attr(model, 1L)     # e.g. "control"
+llama_vocab_fim_pad(model)          # fill-in-the-middle padding token, or NA
 ```
 
 ### Text Generation
@@ -550,6 +622,46 @@ result <- llama_generate(ctx, "prompt")
 
 # Remove all LoRA adapters
 llama_lora_clear(ctx)
+
+# Read the adapter's metadata
+llama_lora_meta(lora)
+llama_lora_meta_val(lora, "general.name")
+```
+
+### Control Vectors
+
+A control vector steers generation by adding a direction to the residual stream
+over a range of layers. Unlike a LoRA it needs no adapter file.
+
+```r
+n_embd <- llama_model_info(model)$n_embd
+
+# One direction per layer, laid end to end, for layers 10..20
+vec <- rnorm(n_embd * (20 - 10 + 1)) * 0.1
+llama_apply_control_vector(ctx, vec, n_embd, il_start = 10L, il_end = 20L)
+
+llama_apply_control_vector(ctx, NULL, n_embd, 10L, 20L)   # clear it again
+```
+
+### Saving and Restoring State
+
+```r
+# Snapshot the whole context in memory, then rewind to it
+snapshot <- llama_state_get_data(ctx)
+llama_generate(ctx, "somewhere else", max_new_tokens = 32L)
+llama_state_set_data(ctx, snapshot)
+
+# Or work one sequence at a time: cache a long shared prefix once and
+# restore it into another sequence rather than decoding it again
+ctx <- llama_new_context(model, n_seq_max = 4L)
+prefix <- llama_state_seq_get_data(ctx, seq_id = 0L)
+llama_state_seq_set_data(ctx, prefix, seq_id = 1L)
+
+# The same state, on disk — the tokens travel with it
+toks <- llama_tokenize(ctx, "A long shared prefix")
+llama_state_seq_save_file(ctx, "prefix.bin", seq_id = 0L, tokens = toks)
+res <- llama_state_seq_load_file(ctx, "prefix.bin", seq_id = 0L)
+identical(res$tokens, toks)
 ```
 
 ### Verbosity Control

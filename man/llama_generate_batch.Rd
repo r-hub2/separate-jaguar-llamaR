@@ -18,7 +18,13 @@ llama_generate_batch(
   repeat_last_n = 64L,
   frequency_penalty = 0,
   presence_penalty = 0,
-  grammar = NULL
+  mirostat = 0L,
+  mirostat_tau = 5,
+  mirostat_eta = 0.1,
+  grammar = NULL,
+  trigger_patterns = NULL,
+  trigger_tokens = NULL,
+  sampler = NULL
 )
 }
 \arguments{
@@ -27,8 +33,12 @@ sufficient \code{n_seq_max} and \code{n_ctx} (see Details).}
 
 \item{prompts}{Character vector of prompts, one per parallel sequence.}
 
-\item{max_new_tokens, temp, top_k, top_p, seed, min_p, typical_p, repeat_penalty, repeat_last_n, frequency_penalty, presence_penalty, grammar}{Sampling parameters; see \code{\link{llama_generate}}. Shared across
-sequences. \code{seed} is offset per sequence (\code{seed + s}).}
+\item{max_new_tokens, temp, top_k, top_p, seed, min_p, typical_p, repeat_penalty, repeat_last_n, frequency_penalty, presence_penalty, mirostat, mirostat_tau, mirostat_eta, grammar, trigger_patterns, trigger_tokens, sampler}{Sampling parameters; see \code{\link{llama_generate}}. Shared across
+sequences. \code{seed} is offset per sequence (\code{seed + s}), so each
+sequence samples independently. For that reason \code{sampler} accepts only
+a parameter list here, not a chain: every sequence needs its own differently
+seeded chain, which one supplied chain cannot provide. Passing a chain is
+an error rather than being silently ignored.}
 }
 \value{
 A list of length \code{length(prompts)}, in the same order as the
@@ -58,8 +68,8 @@ so identical prompts still produce diverse outputs at \code{temp > 0}
 across sequences in this version.
 
 Stop conditions per sequence: end-of-generation token (model-defined) or
-\code{max_new_tokens} reached. Mirostat and \code{with_timings} are not
-supported here yet — use \code{\link{llama_generate}} for those.
+\code{max_new_tokens} reached. \code{with_timings} is not supported here —
+use \code{\link{llama_generate}} for that.
 }
 \examples{
 \dontrun{

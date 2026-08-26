@@ -9,9 +9,12 @@
 #include <array>
 #include <cinttypes>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <future>
+#include <initializer_list>
 #include <regex>
+#include <type_traits>
 
 static const size_t kiB = 1024;
 static const size_t MiB = 1024*kiB;

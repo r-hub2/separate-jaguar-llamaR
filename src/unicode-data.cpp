@@ -3,6 +3,8 @@
 #include "unicode-data.h"
 
 #include <cstdint>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>

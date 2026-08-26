@@ -23,7 +23,9 @@ llama_gen_begin(
   mirostat_eta = 0.1,
   grammar = NULL,
   trigger_patterns = NULL,
-  trigger_tokens = NULL
+  trigger_tokens = NULL,
+  sampler = NULL,
+  sampler_reset = TRUE
 )
 }
 \arguments{
@@ -69,6 +71,25 @@ grammar from the first token. Supplied by \code{\link{llama_chat_build}}.}
 \item{trigger_tokens}{Integer vector of token IDs that lazily activate the
 grammar, the token-level counterpart to \code{trigger_patterns}. \code{NULL}
 (default) means none.}
+
+\item{sampler}{Either a sampler-parameter list from
+  \code{\link{llama_sampler_params}}, or a chain built by hand with
+  \code{\link{llama_sampler_chain_new}}. When supplied it takes precedence
+  over the individual sampling arguments above, and a parameter list is the
+  only way to reach the samplers that have no argument here (DRY, XTC,
+  dynamic temperature, top-n-sigma, logit bias, infill, adaptive-p).
+  \code{NULL} (default) builds the chain from the individual arguments.
+
+  A supplied chain is \strong{copied} for the generation, so the caller's
+  chain is left untouched and its lifetime is its own concern.}
+
+\item{sampler_reset}{Only meaningful when \code{sampler} is a chain. If
+\code{TRUE} (default), the copy starts with its accumulated state cleared
+--- Mirostat's \code{mu}, adaptive-p's moving average, the penalty
+samplers' token history --- so repeated calls with one chain behave
+identically, as they do on the parameter-list path. Set \code{FALSE} to
+carry that state into the generation and deliberately continue where an
+earlier one left off.}
 }
 \value{
 An external pointer holding the generation state. Pass it to

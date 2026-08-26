@@ -7,11 +7,13 @@
 #include "llama-memory.h"
 #include "llama-vocab.h"
 
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 struct llama_cparams;

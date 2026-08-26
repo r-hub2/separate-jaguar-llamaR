@@ -10,6 +10,7 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)

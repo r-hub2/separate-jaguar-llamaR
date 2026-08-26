@@ -3,6 +3,7 @@
 #include "jinja/parser.h"
 
 #include <algorithm>
+#include <cassert>
 #include <memory>
 #include <stdexcept>
 #include <string>

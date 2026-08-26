@@ -23,6 +23,17 @@ A named list with fields:
   - `has_encoder`: whether the model has an encoder
   - `has_decoder`: whether the model has a decoder
   - `is_recurrent`: whether the model is recurrent (e.g. Mamba)
+  - `is_hybrid`: whether the model mixes attention and recurrent layers
+    (e.g. Jamba, Qwen3.5)
+  - `is_diffusion`: whether the model is a diffusion LLM
+  - `n_embd_inp` / `n_embd_out`: input and output embedding widths, which
+    differ from `n_embd` on models whose projections are wider than the
+    residual stream
+  - `n_swa`: sliding-window attention span, `0` when attention is full-context
+  - `rope_type`: one of `"none"`, `"norm"`, `"neox"`, `"mrope"`, `"imrope"`,
+    `"vision"`
+  - `rope_freq_scale_train`: RoPE frequency scaling used during training
+  - `n_cls_out`: number of classifier outputs (`0` for ordinary LLMs)
 }
 \description{
 Get model metadata
@@ -36,4 +47,8 @@ cat("Layers:", info$n_layer, "\n")
 cat("Context:", info$n_ctx_train, "\n")
 cat("Size:", info$size / 1e9, "GB\n")
 }
+}
+\seealso{
+[llama_model_cls_labels], [llama_model_sampling_meta],
+  [llama_vocab_info]
 }

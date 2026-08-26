@@ -5,6 +5,7 @@
 #include <map>
 #include <regex>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct llama_vocab;

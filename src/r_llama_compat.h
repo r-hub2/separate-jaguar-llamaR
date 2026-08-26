@@ -17,6 +17,7 @@
 // "std::((stream == ...) ? 0 : fflush(...))" -> a syntax error on macOS/libc++).
 #ifdef __cplusplus
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <ostream>
 #include <iostream>

@@ -11,6 +11,8 @@
 #include "llama-ext.h"
 #include "llama.h"
 
+#include <algorithm>
+#include <cassert>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>   // [llamaR] perf profiler
@@ -18,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 //
 // llama_context

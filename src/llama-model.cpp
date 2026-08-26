@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cfloat>
 #include <cstdint>
+#include <initializer_list>
 #include <cstring>
 #include <cmath>
 #include <functional>

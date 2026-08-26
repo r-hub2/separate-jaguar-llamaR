@@ -6,10 +6,13 @@
 
 #include <climits>
 #include <cstdarg>
+#include <cstdlib>
 #include <cinttypes>
 #include <string>
+#include <string_view>
 #include <map>
 #include <sstream>
+#include <utility>
 #include <vector>
 #include <memory>
 
