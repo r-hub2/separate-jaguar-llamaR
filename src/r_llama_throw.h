@@ -61,6 +61,17 @@ inline void llamar_copy_what_(char * buf, size_t n, const std::exception & e) {
     }
 }
 
+// Hand a finished message to R. Marked noreturn so both the compiler and rchk
+// know control stops here: Rf_error() longjmps, which is also what resets the
+// protection stack after a throw that jumped over an UNPROTECT.
+#ifdef __GNUC__
+__attribute__((noreturn))
+#endif
+inline void llamar_raise_(const char * msg) {
+    Rf_error("%s", msg);
+    while (1) {}  // Rf_error never returns; silences -Wreturn-type
+}
+
 // Boundary guard. Every extern "C" SEXP entrypoint wraps its body:
 //
 //     extern "C" SEXP r_llama_foo(SEXP x) {
@@ -73,12 +84,21 @@ inline void llamar_copy_what_(char * buf, size_t n, const std::exception & e) {
 // Rf_error() is called only here, after unwinding has destroyed every C++
 // object between the throw site and this frame.
 //
-// NB: Rf_error() must NOT be called from inside a catch block. It leaves by
-// longjmp, so the handler never finishes and __cxa_end_catch() never runs,
-// which leaks the exception object itself (valgrind: "possibly lost" inside
-// __cxa_allocate_exception). The catch blocks therefore only copy the message
-// into a local buffer; the block ends, the exception is released, and only
-// then does Rf_error() longjmp out.
+// Two things the handler has to get right:
+//
+//  1. Rf_error() must NOT be called from inside a catch block. It leaves by
+//     longjmp, so the handler never finishes and __cxa_end_catch() never runs,
+//     which leaks the exception object itself (valgrind: "possibly lost"
+//     inside __cxa_allocate_exception). The catch blocks therefore only copy
+//     the message into a local buffer; the block ends, the exception is
+//     released, and only then does Rf_error() longjmp out.
+//
+//  2. The failure path must end in a call that does not return. R resets the
+//     protection stack itself when Rf_error() longjmps, so a throw between a
+//     PROTECT and its UNPROTECT needs no manual unwinding here -- but only if
+//     control cannot fall through to an ordinary `return` afterwards. Routing
+//     the failure through a noreturn helper says exactly that, and keeps rchk
+//     from reading the boundary as a protection stack imbalance.
 #define LLAMAR_ENTRYPOINT_BEGIN                                                \
     char llamar_err_buf_[1024];                                                \
     bool llamar_failed_ = false;                                               \
@@ -94,7 +114,7 @@ inline void llamar_copy_what_(char * buf, size_t n, const std::exception & e) {
         llamar_failed_ = true;                                                 \
     }                                                                          \
     /* outside the handler: the exception object is gone by now */             \
-    if (llamar_failed_) Rf_error("%s", llamar_err_buf_);                       \
+    if (llamar_failed_) llamar_raise_(llamar_err_buf_);                        \
     return R_NilValue;  /* not reached when llamar_failed_ */
 
 #endif // R_LLAMA_THROW_H

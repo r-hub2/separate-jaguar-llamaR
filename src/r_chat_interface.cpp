@@ -201,7 +201,7 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
         snprintf(err, sizeof(err), "llamaR: chat_build failed: unknown C++ exception");
         failed = true;
     }
-    if (failed) Rf_error("%s", err);
+    if (failed) llamar_raise_(err);
     return R_NilValue;  // unreachable
 }
 
@@ -273,6 +273,6 @@ extern "C" SEXP r_llama_chat_parse(SEXP r_input, SEXP r_format, SEXP r_is_partia
         snprintf(err, sizeof(err), "llamaR: chat_parse failed: unknown C++ exception");
         failed = true;
     }
-    if (failed) Rf_error("%s", err);
+    if (failed) llamar_raise_(err);
     return R_NilValue;  // unreachable
 }
