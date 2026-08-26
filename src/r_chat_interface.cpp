@@ -63,6 +63,8 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
                                    SEXP r_tools_json, SEXP r_tool_choice,
                                    SEXP r_json_schema, SEXP r_add_gen,
                                    SEXP r_enable_thinking) {
+    char err[1024];
+    bool failed = false;
     // NB: argument reading sits inside the try as well — llamar_ptr_arg()
     // reports a bad handle by throwing, and an exception escaping into R's C
     // code calls std::terminate() rather than raising an R error.
@@ -185,11 +187,21 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
 
         UNPROTECT(5);  // result, stops, preserved, tpat, ttok
         return result;
-    } catch (const llamar_exception & e) {
-        Rf_error("%s", e.what());
     } catch (const std::exception & e) {
-        Rf_error("llamaR: chat_build failed: %s", e.what());
+        // Rf_error() stays out of the handler: its longjmp would skip
+        // __cxa_end_catch() and leak the exception object (see
+        // r_llama_throw.h).
+        if (dynamic_cast<const llamar_exception *>(&e) != nullptr) {
+            snprintf(err, sizeof(err), "%s", e.what());
+        } else {
+            snprintf(err, sizeof(err), "llamaR: chat_build failed: %s", e.what());
+        }
+        failed = true;
+    } catch (...) {
+        snprintf(err, sizeof(err), "llamaR: chat_build failed: unknown C++ exception");
+        failed = true;
     }
+    if (failed) Rf_error("%s", err);
     return R_NilValue;  // unreachable
 }
 
@@ -199,6 +211,8 @@ extern "C" SEXP r_llama_chat_build(SEXP r_model, SEXP r_messages_json,
 
 extern "C" SEXP r_llama_chat_parse(SEXP r_input, SEXP r_format, SEXP r_is_partial,
                                    SEXP r_parser) {
+    char err[1024];
+    bool failed = false;
     // Argument reading stays inside the try for the same reason as in
     // chat_build: anything that throws must not escape into R's C code.
     try {
@@ -247,10 +261,18 @@ extern "C" SEXP r_llama_chat_parse(SEXP r_input, SEXP r_format, SEXP r_is_partia
 
         UNPROTECT(4);  // tnames, targs, tids, result
         return result;
-    } catch (const llamar_exception & e) {
-        Rf_error("%s", e.what());
     } catch (const std::exception & e) {
-        Rf_error("llamaR: chat_parse failed: %s", e.what());
+        // Rf_error() stays out of the handler (see chat_build above).
+        if (dynamic_cast<const llamar_exception *>(&e) != nullptr) {
+            snprintf(err, sizeof(err), "%s", e.what());
+        } else {
+            snprintf(err, sizeof(err), "llamaR: chat_parse failed: %s", e.what());
+        }
+        failed = true;
+    } catch (...) {
+        snprintf(err, sizeof(err), "llamaR: chat_parse failed: unknown C++ exception");
+        failed = true;
     }
+    if (failed) Rf_error("%s", err);
     return R_NilValue;  // unreachable
 }

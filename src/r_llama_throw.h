@@ -48,6 +48,19 @@ inline void llamar_error(const char * fmt, ...) {
     throw llamar_exception(buf);
 }
 
+// Render a caught exception into `buf`. llamar_error() messages are already
+// fully formatted and carry their own "llamaR:" prefix, so they pass through
+// unchanged; anything else gets prefixed so the origin stays visible.
+inline void llamar_copy_what_(char * buf, size_t n, const std::exception & e) {
+    if (dynamic_cast<const llamar_exception *>(&e) != nullptr) {
+        snprintf(buf, n, "%s", e.what());
+    } else if (dynamic_cast<const std::bad_alloc *>(&e) != nullptr) {
+        snprintf(buf, n, "llamaR: out of memory");
+    } else {
+        snprintf(buf, n, "llamaR: %s", e.what());
+    }
+}
+
 // Boundary guard. Every extern "C" SEXP entrypoint wraps its body:
 //
 //     extern "C" SEXP r_llama_foo(SEXP x) {
@@ -60,20 +73,28 @@ inline void llamar_error(const char * fmt, ...) {
 // Rf_error() is called only here, after unwinding has destroyed every C++
 // object between the throw site and this frame.
 //
-// NB: the catch blocks must not let a C++ exception escape into R's C code,
-// and Rf_error() itself must be the last thing they do -- it longjmps out.
-#define LLAMAR_ENTRYPOINT_BEGIN try {
+// NB: Rf_error() must NOT be called from inside a catch block. It leaves by
+// longjmp, so the handler never finishes and __cxa_end_catch() never runs,
+// which leaks the exception object itself (valgrind: "possibly lost" inside
+// __cxa_allocate_exception). The catch blocks therefore only copy the message
+// into a local buffer; the block ends, the exception is released, and only
+// then does Rf_error() longjmp out.
+#define LLAMAR_ENTRYPOINT_BEGIN                                                \
+    char llamar_err_buf_[1024];                                                \
+    bool llamar_failed_ = false;                                               \
+    try {
 
 #define LLAMAR_ENTRYPOINT_END                                                  \
-    } catch (const llamar_exception & e) {                                     \
-        Rf_error("%s", e.what());                                              \
-    } catch (const std::bad_alloc &) {                                         \
-        Rf_error("llamaR: out of memory");                                     \
     } catch (const std::exception & e) {                                       \
-        Rf_error("llamaR: %s", e.what());                                      \
+        llamar_copy_what_(llamar_err_buf_, sizeof(llamar_err_buf_), e);        \
+        llamar_failed_ = true;                                                 \
     } catch (...) {                                                            \
-        Rf_error("llamaR: unknown C++ exception");                             \
+        snprintf(llamar_err_buf_, sizeof(llamar_err_buf_),                     \
+                 "llamaR: unknown C++ exception");                             \
+        llamar_failed_ = true;                                                 \
     }                                                                          \
-    return R_NilValue;  /* not reached: every catch above longjmps */
+    /* outside the handler: the exception object is gone by now */             \
+    if (llamar_failed_) Rf_error("%s", llamar_err_buf_);                       \
+    return R_NilValue;  /* not reached when llamar_failed_ */
 
 #endif // R_LLAMA_THROW_H
