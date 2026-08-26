@@ -45,8 +45,14 @@
 static inline mtmd_context * llamar_mtmd_ctx_arg(SEXP x) {
     return (mtmd_context *) llamar_ptr_arg(x, "mtmd context");
 }
-static inline mtmd_bitmap * llamar_bitmap_arg(SEXP x) {
-    return (mtmd_bitmap *) llamar_ptr_arg(x, "bitmap");
+
+// Throwing counterparts, for r_mtmd_eval: it owns a unique_ptr, so a longjmp
+// past it would leak the chunks. See the two flavours in r_llama_ptr.h.
+static inline mtmd_context * llamar_mtmd_ctx_arg_throw(SEXP x) {
+    return (mtmd_context *) llamar_ptr_arg_throw(x, "mtmd context");
+}
+static inline mtmd_bitmap * llamar_bitmap_arg_throw(SEXP x) {
+    return (mtmd_bitmap *) llamar_ptr_arg_throw(x, "bitmap");
 }
 
 // Logging verbosity shared with r_llama_interface.cpp's scheme (0 silent ..
@@ -88,7 +94,6 @@ static void mtmd_bitmap_finalizer(SEXP x) {
 
 extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
                             SEXP r_n_threads, SEXP r_use_gpu) {
-    LLAMAR_ENTRYPOINT_BEGIN
     llama_model * model = (llama_model *) llamar_ptr_arg(r_model, "model");
 
     const char * mmproj = CHAR(STRING_ELT(r_mmproj_path, 0));
@@ -105,7 +110,7 @@ extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
 
     mtmd_context * mctx = mtmd_init_from_file(mmproj, model, params);
     if (!mctx) {
-        llamar_error("llamaR: failed to load multimodal projector from '%s'", mmproj);
+        Rf_error("llamaR: failed to load multimodal projector from '%s'", mmproj);
     }
 
     // prot = r_model keeps the text model alive while mctx references it
@@ -113,34 +118,25 @@ extern "C" SEXP r_mtmd_init(SEXP r_model, SEXP r_mmproj_path,
     R_RegisterCFinalizer(result, mtmd_ctx_finalizer);
     UNPROTECT(1);
     return result;
-    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_support_vision(SEXP r_mctx) {
-    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_vision(mctx));
-    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_support_audio(SEXP r_mctx) {
-    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
     return Rf_ScalarLogical(mtmd_support_audio(mctx));
-    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_marker(void) {
-    LLAMAR_ENTRYPOINT_BEGIN
     return Rf_mkString(mtmd_default_marker());
-    LLAMAR_ENTRYPOINT_END
 }
 
 extern "C" SEXP r_mtmd_set_verbosity(SEXP r_level) {
-    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_log_verbosity = Rf_asInteger(r_level);
     return R_NilValue;
-    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -148,20 +144,18 @@ extern "C" SEXP r_mtmd_set_verbosity(SEXP r_level) {
 // ============================================================
 
 extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
-    LLAMAR_ENTRYPOINT_BEGIN
     mtmd_context * mctx = llamar_mtmd_ctx_arg(r_mctx);
 
     const char * path = CHAR(STRING_ELT(r_path, 0));
     mtmd_bitmap * bmp = mtmd_helper_bitmap_init_from_file(mctx, path);
     if (!bmp) {
-        llamar_error("llamaR: failed to load media file '%s'", path);
+        Rf_error("llamaR: failed to load media file '%s'", path);
     }
 
     SEXP result = PROTECT(R_MakeExternalPtr(bmp, R_NilValue, R_NilValue));
     R_RegisterCFinalizer(result, mtmd_bitmap_finalizer);
     UNPROTECT(1);
     return result;
-    LLAMAR_ENTRYPOINT_END
 }
 
 // ============================================================
@@ -171,9 +165,9 @@ extern "C" SEXP r_mtmd_bitmap_from_file(SEXP r_mctx, SEXP r_path) {
 extern "C" SEXP r_mtmd_eval(SEXP r_mctx, SEXP r_lctx, SEXP r_prompt,
                             SEXP r_bitmap, SEXP r_n_past) {
     LLAMAR_ENTRYPOINT_BEGIN
-    mtmd_context  * mctx = llamar_mtmd_ctx_arg(r_mctx);
-    llama_context * lctx = (llama_context *) llamar_ptr_arg(r_lctx, "llama context");
-    mtmd_bitmap   * bmp  = llamar_bitmap_arg(r_bitmap);
+    mtmd_context  * mctx = llamar_mtmd_ctx_arg_throw(r_mctx);
+    llama_context * lctx = (llama_context *) llamar_ptr_arg_throw(r_lctx, "llama context");
+    mtmd_bitmap   * bmp  = llamar_bitmap_arg_throw(r_bitmap);
 
     const char * prompt = CHAR(STRING_ELT(r_prompt, 0));
     const llama_pos n_past_in = (llama_pos) Rf_asInteger(r_n_past);
